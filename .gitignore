@@ -1,0 +1,10 @@
+# Datos personales (perfil, planes, progreso) y errores locales
+datos.json
+error.log
+__pycache__/
+*.pyc
+
+# El APK y su carpeta de compilación llevan el token de Drive: NUNCA a GitHub
+apk/
+*.apk
+**/drive-config.js
