@@ -293,7 +293,7 @@ class Main(QWidget):
         self._init_load()
         self._init_hola()
 
-        self.aplicar_tema(self.tkey)
+        self.aplicar_tema(self.tkey, False)
         if self.datos.get("usuario"):
             self._estado("")
             self.entrar_modo()
@@ -312,8 +312,9 @@ class Main(QWidget):
         except Exception:
             return {}
 
-    def _guardar(self, sincronizar=True):
-        self.datos["modificado"] = datetime.now().isoformat(timespec="seconds")
+    def _guardar(self, sincronizar=True, tocar=True):
+        if tocar:  # «modificado» solo cambia con cambios reales (decide qué copia manda al sincronizar)
+            self.datos["modificado"] = datetime.now().isoformat(timespec="seconds")
         DATA.write_text(json.dumps(self.datos, ensure_ascii=False, indent=1), encoding="utf8")
         if sincronizar and self.datos.get("usuario"):
             self.timer_sync.start()
@@ -330,7 +331,7 @@ class Main(QWidget):
     def sec(self):
         return self.datos.setdefault(self.modo, {})
 
-    def aplicar_tema(self, key):
+    def aplicar_tema(self, key, guardar=True):
         self.tkey = key
         t = THEMES[key]
         self.setStyleSheet(make_qss(t))
@@ -341,7 +342,8 @@ class Main(QWidget):
         except RuntimeError:
             self.anim = None
         self.datos["tema"] = key
-        self._guardar()
+        if guardar:
+            self._guardar()
         self._titulos()
 
     def _titulos(self):
@@ -586,7 +588,8 @@ class Main(QWidget):
         b2 = QPushButton("🔁 Cambiar solo días y tiempo (mantengo mi perfil)"); b2.clicked.connect(lambda: self.rehacer(False))
         b3 = QPushButton("🔄 Rehacer el quiz completo"); b3.clicked.connect(lambda: self.rehacer(True))
         b4 = QPushButton("👤 Cambiar de usuario"); b4.clicked.connect(self.cambiar_usuario)
-        for b in (b1, b2, b3, b4):
+        b5 = QPushButton("🔗 Copiar código para vincular la web con mi Drive"); b5.clicked.connect(self.copiar_codigo)
+        for b in (b1, b2, b3, b4, b5):
             ml.addWidget(b)
         ml.addStretch()
         tabs.addTab(w, "⚙️ Más")
@@ -783,7 +786,7 @@ class Main(QWidget):
                 if tema:
                     self.datos["tema"] = tema
                 self.modo = self.datos.get("modo") if self.datos.get("modo") in MODOS else "calistenia"
-                self._guardar(sincronizar=False)
+                self._guardar(sincronizar=False, tocar=False)
                 self._estado("☁️ Datos cargados de Drive")
                 self.entrar_modo()
                 return
@@ -827,6 +830,19 @@ class Main(QWidget):
         u = self.datos.get("usuario")
         quien = f"👤 {u['nombre']} ({u['edad']})" if u else ""
         self.lbl_sync.setText(" · ".join(x for x in (quien, txt) if x))
+
+    def copiar_codigo(self):
+        try:
+            codigo = drive.codigo_vinculacion()
+        except Exception as e:
+            QMessageBox.warning(self, "Código de vinculación", f"No se pudo crear el código:\n{e}")
+            return
+        QApplication.clipboard().setText(codigo)
+        QMessageBox.information(
+            self, "Código copiado",
+            "Código copiado al portapapeles.\n\nAbre la web (https://nandorro.github.io/entrenamientorro/), "
+            "pulsa «Sincronizar con mi Drive» (o Más → Vincular) y pégalo.\n\n"
+            "⚠️ Da acceso a todo tu Drive: no lo compartas ni lo publiques. Se guarda solo en ese navegador.")
 
     def cambiar_usuario(self):
         if QMessageBox.question(self, "Cambiar de usuario",

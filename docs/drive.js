@@ -1,24 +1,51 @@
-/* Sincronización con Google Drive (carpeta «entrenamientorro») para la versión APK.
+/* Sincronización con Google Drive (carpeta «entrenamientorro»).
  *
- * Solo está activa si existe window.DRIVE_CONFIG (lo genera apk/preparar_config.py y NUNCA se sube a GitHub).
- * En la web pública no hay credenciales: Sync.activo = false y los datos quedan en el dispositivo.
- * El archivo de cada usuario es  entrenamientorro/<nombre>.json  (mismo nombre que usa la versión de PC).
+ * Las credenciales NUNCA van en GitHub. Pueden venir de dos sitios:
+ *   · APK: window.DRIVE_CONFIG (lo genera apk/preparar_config.py al compilar; el APK es privado).
+ *   · Web: un «código de vinculación» que copias desde la app de PC (Más → «Copiar código…») y pegas una vez;
+ *          se guarda solo en este navegador (localStorage) y se puede desvincular cuando quieras.
+ * El archivo de cada usuario es  entrenamientorro/<nombre>.json  (mismo nombre en PC, web y APK).
  */
 (function (root) {
-  const cfg = root.DRIVE_CONFIG;
-  const Sync = { activo: !!(cfg && cfg.refresh_token) };
+  const CLAVE = "entrenamientorro.drive";
   const API = "https://www.googleapis.com/drive/v3/files";
   const UP = "https://www.googleapis.com/upload/drive/v3/files";
   let tok = null, tokHasta = 0, carpetaId = null;
 
+  function guardada() {
+    try { return JSON.parse(localStorage.getItem(CLAVE)); } catch (e) { return null; }
+  }
+  const ok = (c) => !!(c && c.client_id && c.client_secret && c.refresh_token);
+  const cfg = () => (ok(root.DRIVE_CONFIG) ? root.DRIVE_CONFIG : (ok(guardada()) ? guardada() : null));
+
+  const Sync = {};
+  Object.defineProperty(Sync, "activo", { get: () => !!cfg() });
+  /** 'apk' | 'codigo' | null */
+  Object.defineProperty(Sync, "origen", { get: () => (ok(root.DRIVE_CONFIG) ? "apk" : (ok(guardada()) ? "codigo" : null)) });
+
+  Sync.vincular = function (codigo) {
+    try {
+      const c = JSON.parse(atob(String(codigo).replace(/\s+/g, "")));
+      if (!ok(c)) return false;
+      localStorage.setItem(CLAVE, JSON.stringify({ client_id: c.client_id, client_secret: c.client_secret, refresh_token: c.refresh_token }));
+      tok = null; carpetaId = null;
+      return true;
+    } catch (e) { return false; }
+  };
+  Sync.desvincular = function () {
+    try { localStorage.removeItem(CLAVE); } catch (e) { /* nada */ }
+    tok = null; carpetaId = null;
+  };
+
   async function token() {
     if (tok && Date.now() < tokHasta) return tok;
+    const c = cfg();
     const r = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
-        client_id: cfg.client_id, client_secret: cfg.client_secret,
-        refresh_token: cfg.refresh_token, grant_type: "refresh_token",
+        client_id: c.client_id, client_secret: c.client_secret,
+        refresh_token: c.refresh_token, grant_type: "refresh_token",
       }).toString(),
     });
     if (!r.ok) throw new Error("token " + r.status);
@@ -28,7 +55,7 @@
     return tok;
   }
 
-  const espera = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const espera = (ms) => new Promise((fin) => setTimeout(fin, ms));
   // Drive responde 403/429/5xx cuando se agota la cuota por minuto del proyecto (pasa con el cliente compartido
   // de rclone): se reintenta con espera creciente, igual que hace rclone.
   async function api(url, opts) {
@@ -37,7 +64,7 @@
       const t = await token();
       const r = await fetch(url, Object.assign({}, opts, { headers: Object.assign({ Authorization: "Bearer " + t }, opts.headers || {}) }));
       if (r.ok || r.status === 404) return r;
-      const reintentable = r.status === 403 || r.status === 429 || r.status >= 500;
+      const reintentable = r.status === 401 || r.status === 403 || r.status === 429 || r.status >= 500;
       if (!reintentable || intento >= 7) throw new Error("drive " + r.status);
       if (r.status === 401) tok = null;
       await espera(Math.min(20000, 800 * Math.pow(2, intento)) + Math.random() * 500);

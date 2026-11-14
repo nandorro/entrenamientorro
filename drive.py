@@ -26,6 +26,35 @@ def buscar_rclone():
     return None
 
 
+def codigo_vinculacion() -> str:
+    """Código para vincular la web/APK con tu Drive (base64 de client_id, client_secret y refresh_token).
+
+    Sale del remoto «gdrive» de rclone. Si ese remoto usa el cliente compartido de rclone (client_id vacío),
+    las credenciales públicas de rclone se toman de apk/www/drive-config.js (archivo local, nunca en git).
+    ATENCIÓN: el código da acceso a todo tu Drive; no lo compartas ni lo publiques.
+    """
+    import base64
+    import json
+    exe = buscar_rclone()
+    if not exe:
+        raise RuntimeError("No encuentro rclone.")
+    r = subprocess.run([exe, "config", "dump"], capture_output=True, text=True, encoding="utf8",
+                       creationflags=NOFLAGS, timeout=60)
+    g = json.loads(r.stdout).get("gdrive")
+    if not g:
+        raise RuntimeError("No existe el remoto «gdrive» en rclone.")
+    cid, sec = g.get("client_id"), g.get("client_secret")
+    if not (cid and sec):
+        local = Path(__file__).resolve().parent / "apk" / "www" / "drive-config.js"
+        if not local.exists():
+            raise RuntimeError("Tu rclone usa el cliente compartido y falta apk/www/drive-config.js "
+                               "(ejecuta apk/compilar.sh una vez).")
+        cfg = json.loads(local.read_text(encoding="utf8").split("=", 1)[1].strip().rstrip(";"))
+        cid, sec = cfg["client_id"], cfg["client_secret"]
+    conf = {"client_id": cid, "client_secret": sec, "refresh_token": json.loads(g["token"])["refresh_token"]}
+    return base64.b64encode(json.dumps(conf).encode()).decode()
+
+
 def slug(nombre: str) -> str:
     s = "".join(c for c in unicodedata.normalize("NFD", nombre.lower()) if unicodedata.category(c) != "Mn")
     return re.sub(r"[^a-z0-9]+", "_", s).strip("_") or "usuario"

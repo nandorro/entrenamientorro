@@ -135,6 +135,22 @@
     if (sec().plan) mostrarPlan(); else iniciarQuiz(false);
   }
 
+  // ------------------------------------------------------------ vincular Drive con un código (web)
+  function formVincular(id) {
+    return `<details class="vinc"><summary class="hint">🔗 Sincronizar con mi Drive (código de vinculación)</summary>
+      <p class="hint">En la app de PC: Más → «Copiar código de vinculación». Pégalo aquí una sola vez; se guarda solo en este navegador y puedes desvincularlo cuando quieras. No lo compartas: da acceso a tu Drive.</p>
+      <textarea id="${id}t" rows="3" placeholder="Pega aquí el código" style="width:100%;border-radius:10px;padding:8px;background:rgba(0,0,0,.43);color:inherit;border:1px solid var(--accent)"></textarea>
+      <button class="btn" id="${id}b" style="margin-top:6px">Vincular</button><div class="hint msg" id="${id}m"></div></details>`;
+  }
+  function initVincular(id, tras) {
+    const b = $("#" + id + "b");
+    if (!b) return;
+    b.onclick = () => {
+      if (Sync.vincular($("#" + id + "t").value)) tras();
+      else $("#" + id + "m").textContent = "⚠️ Ese código no es válido. Cópialo otra vez desde la app de PC.";
+    };
+  }
+
   // ------------------------------------------------------------ bienvenida (nombre y edad)
   function mostrarBienvenida() {
     nav.style.display = "none";
@@ -146,7 +162,9 @@
       <input type="text" id="nombre" placeholder="Tu nombre" maxlength="40" autocomplete="given-name" value="${esc(u.nombre || "")}">
       <input type="number" id="edad" min="14" max="90" value="${u.edad || (datos.perfil && datos.perfil.edad) || 30}" aria-label="Edad">
       <button class="btn" id="entrar">Entrar →</button>
+      ${drive ? `<p class="hint">☁️ Drive vinculado${Sync.origen === "codigo" ? " en este navegador" : ""}.</p>` : formVincular("v1")}
       <div class="hint msg" id="msg"></div></div>`;
+    if (!drive) initVincular("v1", () => mostrarBienvenida());
     const entrar = async () => {
       const nombre = $("#nombre").value.trim();
       if (!nombre) { $("#msg").textContent = "Escribe tu nombre para continuar."; return; }
@@ -406,7 +424,18 @@
       <button class="btn" id="bPar">🔁 Cambiar solo días y tiempo (mantengo mi perfil)</button>
       <button class="btn" id="bTodo">🔄 Rehacer el quiz completo</button>
       <button class="btn" id="bUsu">👤 Cambiar de usuario</button>
+      ${Sync.origen === "apk" ? `<p class="hint">☁️ Drive activo en esta app.</p>`
+        : Sync.origen === "codigo" ? `<p class="hint">☁️ Drive vinculado en este navegador.</p><button class="btn" id="bDesv">🔌 Desvincular Drive de este navegador</button>`
+        : formVincular("v2")}
       <p class="hint msg" id="msgMas"></p></div>`;
+    if (Sync.origen === null) {
+      initVincular("v2", () => {
+        setEstado("☁️ Sincronizando…");
+        Sync.descargar(datos.usuario.nombre).then((x) => remotoRecibido(x.estado, x.texto, true));
+        initMas();
+      });
+    }
+    if ($("#bDesv")) $("#bDesv").onclick = () => { Sync.desvincular(); setEstado("Drive desvinculado"); initMas(); };
     $("#bMd").onclick = () => {
       const md = [`# Plan de ${D.MODOS[modo].label} (${plan.creado})`];
       const semanas = esGym ? [...Array(plan.semanas).keys()].map((x) => x + 1) : [1];
