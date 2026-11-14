@@ -28,12 +28,20 @@
     return tok;
   }
 
+  const espera = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  // Drive responde 403/429/5xx cuando se agota la cuota por minuto del proyecto (pasa con el cliente compartido
+  // de rclone): se reintenta con espera creciente, igual que hace rclone.
   async function api(url, opts) {
     opts = opts || {};
-    const t = await token();
-    const r = await fetch(url, Object.assign({}, opts, { headers: Object.assign({ Authorization: "Bearer " + t }, opts.headers || {}) }));
-    if (!r.ok && r.status !== 404) throw new Error("drive " + r.status);
-    return r;
+    for (let intento = 0; ; intento++) {
+      const t = await token();
+      const r = await fetch(url, Object.assign({}, opts, { headers: Object.assign({ Authorization: "Bearer " + t }, opts.headers || {}) }));
+      if (r.ok || r.status === 404) return r;
+      const reintentable = r.status === 403 || r.status === 429 || r.status >= 500;
+      if (!reintentable || intento >= 7) throw new Error("drive " + r.status);
+      if (r.status === 401) tok = null;
+      await espera(Math.min(20000, 800 * Math.pow(2, intento)) + Math.random() * 500);
+    }
   }
 
   async function buscar(q) {
