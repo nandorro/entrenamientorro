@@ -6,9 +6,10 @@ Los codos y rodillas se calculan con cinemática inversa. Coordenadas: suelo en 
 import math
 import time
 import unicodedata
+from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
 GROUND = 112
@@ -293,6 +294,52 @@ def pose_en(anim, t):
     u = 0.0 if u < hold else (u - hold) / dur
     u = u * u * (3 - 2 * u)
     return _mezcla(fr[seq[i]], fr[seq[i + 1]], u)
+
+
+class FotoWidget(QWidget):
+    """Dos fotos del ejercicio (posición inicial y final) que se alternan. Fotos: Free Exercise DB (dominio público)."""
+
+    CARPETA = Path(__file__).resolve().parent / "docs" / "fotos"
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(230)
+        self.fotos = []
+        self.i = 0
+        self.timer = QTimer(self, interval=1100, timeout=self._siguiente)
+        self.timer.start()
+
+    def set_foto(self, clave):
+        self.fotos = []
+        for n in (0, 1):
+            f = self.CARPETA / f"{clave}_{n}.jpg"
+            if clave and f.exists():
+                self.fotos.append(QPixmap(str(f)))
+        self.i = 0
+        self.setVisible(len(self.fotos) == 2)
+        self.update()
+
+    def _siguiente(self):
+        if self.fotos:
+            self.i = (self.i + 1) % len(self.fotos)
+            self.update()
+
+    def paintEvent(self, _):
+        if not self.fotos:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        r = QRectF(self.rect()).adjusted(2, 2, -2, -2)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor("white"))
+        p.drawRoundedRect(r, 14, 14)
+        pm = self.fotos[self.i]
+        esc = min(r.width() / pm.width(), r.height() / pm.height())
+        w, h = pm.width() * esc, pm.height() * esc
+        p.drawPixmap(QRectF(r.center().x() - w / 2, r.center().y() - h / 2, w, h), pm, QRectF(pm.rect()))
+        p.setPen(QColor("#555"))
+        p.drawText(r.adjusted(0, 0, -8, -4), Qt.AlignRight | Qt.AlignBottom, "Free Exercise DB · dominio público")
+        p.end()
 
 
 class AnimWidget(QWidget):

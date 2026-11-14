@@ -16,14 +16,17 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QPointF, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPen, QRadialGradient
-from PySide6.QtWidgets import (QApplication, QComboBox, QDoubleSpinBox, QFileDialog, QFrame, QHBoxLayout, QLineEdit,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFrame, QHBoxLayout, QLineEdit,
                                QLabel, QListWidget, QListWidgetItem, QMessageBox, QProgressBar, QPushButton, QScrollArea,
                                QSpinBox, QStackedWidget, QTabWidget, QTextBrowser, QVBoxLayout, QWidget)
 
 import drive
-from animaciones import ANIMS, AnimWidget, anim_para
+from animaciones import ANIMS, AnimWidget, FotoWidget, anim_para
 from gym import (FASES, ejercicio_en, generar_plan_gym, prescripcion_gym, titulo_semana)
+from graficas import Analisis, GraficaBarras, GraficaLinea
+from nutricion import generar_plan_nutricion
 from plan import NOMBRES_DIAS, generar_plan, prescripcion, resumen_perfil
+from progreso import carga_semanal, proyeccion_peso
 
 AQUI = Path(__file__).resolve().parent
 DATA = AQUI / "datos.json"
@@ -219,6 +222,21 @@ PREG = {p["k"]: p for p in [
     {"k": "sueno", "t": "¿Cuántas horas duermes normalmente?", "o": [
         ("Menos de 6 h", "<6"), ("6 – 7 h", "6-7"), ("7 – 8 h", "7-8"), ("Más de 8 h", "8+")]},
     {"k": "datos", "t": "Tus medidas", "form": True},
+    {"k": "sexo", "t": "Para calcular tu gasto de energía, ¿cuál es tu sexo?", "o": [
+        ("👨 Hombre", "hombre"), ("👩 Mujer", "mujer"), ("Prefiero no decirlo", "otro")]},
+    {"k": "info_nutri", "info": True, "t": "Comer bien es la mitad del resultado",
+     "texto": "Calculamos tus calorías, proteínas y agua según tu cuerpo y tu objetivo, y te proponemos menús sencillos. Sin dietas extremas."},
+    {"k": "dieta", "t": "¿Qué tipo de dieta prefieres?", "o": [
+        ("🍗 De todo (omnívora)", "omnivora"), ("🥚 Vegetariana", "vegetariana"), ("🌱 Vegana", "vegana")]},
+    {"k": "comidas", "t": "¿Cuántas comidas al día prefieres?", "o": [("3 comidas", 3), ("4 comidas", 4), ("5 comidas", 5)]},
+    {"k": "desayuno", "t": "¿A qué hora sueles desayunar?", "o": [
+        ("Antes de las 7", "<7"), ("Entre las 7 y las 9", "7-9"), ("Entre las 9 y las 11", "9-11")]},
+    {"k": "agua", "t": "¿Cuánta agua bebes al día?\n(1 vaso = 250 ml)", "o": [
+        ("Menos de 3 vasos", "<3"), ("3 – 5 vasos", "3-5"), ("6 – 8 vasos", "6-8"), ("Más de 8 vasos", "8+")]},
+    {"k": "antojos", "t": "¿Qué sueles antojarte?\n(puedes elegir varias o ninguna)", "multi": True, "o": [
+        ("🍫 Dulces", "dulces"), ("🥨 Salado", "salado"), ("🍟 Frituras", "frituras"), ("🥤 Refrescos", "refrescos"),
+        ("🍷 Alcohol", "alcohol")]},
+    {"k": "registro", "t": "¿Sueles apuntar lo que comes?", "o": [("Sí, casi siempre", "si"), ("No", "no")]},
     {"k": "gym_dias", "t": "¿Cuántos días por semana irás al gimnasio?", "o": [
         (f"{n} días", n) for n in (2, 3, 4, 5, 6)]},
     {"k": "gym_duracion", "t": "¿Cuánto tiempo tienes en el gimnasio por sesión?", "o": [
@@ -230,21 +248,27 @@ ORDEN = {
     "gym": ["objetivo", "info_meta", "experiencia", "actual", "flexiones", "dominadas", "sentadillas", "info_nivel",
             "zonas", "info_estilo", "limitaciones", "dia", "sueno", "datos", "gym_dias", "gym_duracion"],
 }
-SOLO_MODO = {"calistenia": ["equipo", "dias", "duracion"], "gym": ["gym_dias", "gym_duracion"]}
+ORDEN["nutricion"] = ["objetivo", "sexo", "dia", "sueno", "datos", "info_nutri", "dieta", "comidas", "desayuno", "agua",
+                      "antojos", "registro"]
+SOLO_MODO = {"calistenia": ["equipo", "dias", "duracion"], "gym": ["gym_dias", "gym_duracion"],
+             "nutricion": ["dieta", "comidas", "desayuno", "agua", "antojos", "registro"]}
 MODOS = {
     "calistenia": dict(label="💪 Calistenia", title="💪 Calistenia Plan 💪", tagline=None),
     "gym": dict(label="🥦 GymBrocoli", title="🥦 GymBrocoli 🥦",
                 tagline="Hierro, brócoli y progresión semana a semana."),
+    "nutricion": dict(label="🥗 Nutrición", title="🥗 Nutrición 🥗",
+                      tagline="Calorías, proteína y agua a tu medida, sin dietas extremas."),
 }
 PERFIL_KEYS = ["objetivo", "experiencia", "actual", "flexiones", "dominadas", "sentadillas", "zonas", "limitaciones",
-               "dia", "sueno", "edad", "altura", "peso", "peso_obj"]
+               "dia", "sueno", "sexo", "edad", "altura", "peso", "peso_obj"]
 # Bloques del quiz (como el «My Profile» de las apps de entrenamiento): se muestran en la barra de progreso
 SECCION = {"objetivo": "Perfil", "info_meta": "Perfil", "experiencia": "Perfil", "actual": "Perfil",
            "flexiones": "Entrenamiento", "dominadas": "Entrenamiento", "sentadillas": "Entrenamiento",
            "info_nivel": "Entrenamiento", "zonas": "Entrenamiento", "equipo": "Entrenamiento", "dias": "Entrenamiento",
            "duracion": "Entrenamiento", "gym_dias": "Entrenamiento", "gym_duracion": "Entrenamiento",
            "info_estilo": "Estilo de vida", "limitaciones": "Estilo de vida", "dia": "Estilo de vida",
-           "sueno": "Estilo de vida", "datos": "Medidas"}
+           "sueno": "Estilo de vida", "datos": "Medidas", "sexo": "Perfil", "info_nutri": "Nutrición", "dieta": "Nutrición",
+           "comidas": "Nutrición", "desayuno": "Nutrición", "agua": "Nutrición", "antojos": "Nutrición", "registro": "Nutrición"}
 
 
 class Bus(QObject):
@@ -314,8 +338,9 @@ class Main(QWidget):
         pl.addWidget(self.stack)
         root.addWidget(self.panel, 1)
 
-        self.p_quiz, self.p_load, self.p_plan, self.p_hola = QWidget(), QWidget(), QWidget(), QWidget()
-        for w in (self.p_quiz, self.p_load, self.p_plan, self.p_hola):
+        self.p_quiz, self.p_load, self.p_plan, self.p_hola, self.p_res = (QWidget(), QWidget(), QWidget(), QWidget(),
+                                                                          QWidget())
+        for w in (self.p_quiz, self.p_load, self.p_plan, self.p_hola, self.p_res):
             self.stack.addWidget(w)
         self.quiz_l = QVBoxLayout(self.p_quiz)
         self._init_load()
@@ -364,6 +389,11 @@ class Main(QWidget):
         t = THEMES[key]
         self.setStyleSheet(make_qss(t))
         self.scene.set_theme(t)
+        for w in getattr(self, "charts", []):
+            try:
+                w.set_theme(t)
+            except RuntimeError:
+                pass
         try:
             if self.anim is not None:
                 self.anim.set_theme(t)
@@ -415,12 +445,15 @@ class Main(QWidget):
     # ----------------------------------------------------------- QUIZ
     def iniciar_quiz(self, completo=False):
         perfil = self.datos.get("perfil")
-        if perfil and not completo:
-            claves = SOLO_MODO[self.modo]
-        else:
-            claves = ORDEN[self.modo]
+        usa = bool(perfil and not completo)
+
+        def cubierta(k):  # ya respondida en otra modalidad (o pantalla informativa que no hace falta repetir)
+            if k.startswith("info"):
+                return True
+            return ("altura" in perfil and "peso" in perfil) if k == "datos" else k in perfil
+        claves = [k for k in ORDEN[self.modo] if not (usa and cubierta(k))]
         self.preguntas = [PREG[k] for k in claves]
-        self.reutiliza = bool(perfil and not completo)
+        self.reutiliza = usa
         self.paso, self.resp = 0, {}
         self.mostrar_pregunta()
 
@@ -505,35 +538,37 @@ class Main(QWidget):
         self.paso -= 1
         self.mostrar_pregunta()
 
-    # ----------------------------------------------------------- CARGA
+    # ----------------------------------------------------------- ANÁLISIS Y RESULTADO
     def _init_load(self):
         l = QVBoxLayout(self.p_load)
-        l.addStretch()
-        self.load_lbl = QLabel("", objectName="pregunta")
+        self.load_lbl = QLabel("🔎 Analizando tus respuestas…", objectName="pregunta")
         self.load_lbl.setAlignment(Qt.AlignCenter)
-        self.load_bar = QProgressBar()
+        self.analisis = Analisis()
+        self.charts = [self.analisis]
         l.addWidget(self.load_lbl)
-        l.addSpacing(10)
-        l.addWidget(self.load_bar)
-        l.addStretch()
+        l.addWidget(self.analisis, 1)
 
     def iniciar_carga(self):
         self.stack.setCurrentWidget(self.p_load)
-        self.load_bar.setValue(0)
-        self.fases = [(25, "🧮 Calculando tu nivel…"), (55, "🔗 Eligiendo ejercicios…"),
-                      (85, "📅 Organizando tus semanas…"), (100, "🎉 ¡Plan listo!")]
-        self.load_lbl.setText("🔎 Analizando tus respuestas…")
-        self.cargando = QTimer(self, interval=650)
+        pasos = {
+            "calistenia": ["Perfil y objetivo", "Nivel de fuerza (flexiones, dominadas, sentadillas)",
+                           "Estilo de vida y descanso", "Medidas y meta de peso", "Construyendo tu plan de 4 semanas"],
+            "gym": ["Perfil y objetivo", "Nivel de fuerza (flexiones, dominadas, sentadillas)",
+                    "Estilo de vida y descanso", "Medidas y meta de peso", "Construyendo tu plan de 12 semanas"],
+            "nutricion": ["Perfil y objetivo", "Gasto de energía (metabolismo)", "Hábitos de comida y agua",
+                          "Medidas y meta de peso", "Calculando calorías, macros y menús"],
+        }[self.modo]
+        self.analisis.set_theme(THEMES[self.tkey])
+        self.analisis.set_pasos(pasos)
+        self.cargando = QTimer(self, interval=45)
         self.cargando.timeout.connect(self._carga_paso)
         self.cargando.start()
 
     def _carga_paso(self):
-        pct, txt = self.fases.pop(0)
-        self.load_bar.setValue(pct)
-        self.load_lbl.setText(txt)
-        if not self.fases:
+        self.analisis.set_pct(self.analisis.pct + 1.2)
+        if self.analisis.pct >= 100:
             self.cargando.stop()
-            QTimer.singleShot(500, self._terminar_carga)
+            QTimer.singleShot(450, self._terminar_carga)
 
     def _terminar_carga(self):
         resp = dict(self.resp)
@@ -545,12 +580,61 @@ class Main(QWidget):
         r = {**perfil, **{k: v for k, v in resp.items() if k not in PERFIL_KEYS}}
         if self.modo == "gym":
             plan = generar_plan_gym(r)
+        elif self.modo == "nutricion":
+            plan = generar_plan_nutricion(r)
         else:
             plan = generar_plan(r)
         plan["creado"] = date.today().isoformat()
         self.datos[self.modo] = {"plan": plan, "log": {}}
         self._guardar()
-        self.mostrar_plan()
+        self.mostrar_resultado()
+
+    def mostrar_resultado(self):
+        """Pantalla final: gráficas de progreso previsto (como el «tu plan» de las apps de entrenamiento)."""
+        if self.p_res.layout():
+            self._vaciar(self.p_res.layout())
+            QWidget().setLayout(self.p_res.layout())
+        plan = self.sec["plan"]
+        r = plan["resumen"]
+        t = THEMES[self.tkey]
+        l = QVBoxLayout(self.p_res)
+        tit = QLabel("🎉 ¡Tu plan está listo!", objectName="pregunta")
+        tit.setAlignment(Qt.AlignCenter)
+        l.addWidget(tit)
+        self.charts = []
+        proy = proyeccion_peso(r)
+        if proy:
+            g = GraficaLinea()
+            g.set_theme(t)
+            nota = (f"Meta de {proy['meta']:g} kg hacia la semana {proy['semanas']} a un ritmo saludable. "
+                    if proy["alcanza"] else f"A ritmo saludable en 52 semanas llegarías a {proy['puntos'][-1][1]:g} kg. ")
+            g.set_datos({"titulo": "Tu peso previsto", "puntos": proy["puntos"], "unidad_y": "kg",
+                         "nota": nota.replace(".", ",", 0) + "Estimación orientativa."})
+            l.addWidget(g)
+            self.charts.append(g)
+        if plan.get("tipo") == "nutricion":
+            m = plan["macros"]
+            g = GraficaBarras()
+            g.set_theme(t)
+            g.set_datos({"titulo": "Reparto de tus calorías (kcal)", "valores": [m["p"] * 4, m["c"] * 4, m["g"] * 9],
+                         "etiquetas": ["Proteína", "Hidratos", "Grasa"],
+                         "nota": f"Objetivo diario: {plan['kcal']} kcal · agua {plan['agua']:g} L".replace(".", ",", 0)})
+            l.addWidget(g)
+            self.charts.append(g)
+        else:
+            vals = carga_semanal(plan)
+            g = GraficaBarras()
+            g.set_theme(t)
+            g.set_datos({"titulo": "Series por semana (tu progresión)", "valores": vals,
+                         "etiquetas": [str(i + 1) for i in range(len(vals))],
+                         "resaltar": [i for i in range(len(vals)) if (i + 1) % 4 == 0],
+                         "nota": "Las barras claras son semanas de descarga: bajas el volumen para recuperar."})
+            l.addWidget(g)
+            self.charts.append(g)
+        b = QPushButton("Ver mi plan →")
+        b.clicked.connect(self.mostrar_plan)
+        l.addWidget(b)
+        self.stack.setCurrentWidget(self.p_res)
 
     # ----------------------------------------------------------- PLAN
     def mostrar_plan(self):
@@ -561,6 +645,9 @@ class Main(QWidget):
         r = plan["resumen"]
         self.plan, self.r = plan, r
         self.es_gym = plan.get("tipo") == "gym"
+        self.es_nutri = plan.get("tipo") == "nutricion"
+        if self.es_nutri:
+            return self.mostrar_plan_nutri()
         l = QVBoxLayout(self.p_plan)
 
         kpis = QHBoxLayout()
@@ -603,7 +690,11 @@ class Main(QWidget):
         self.anim = AnimWidget()
         self.anim.set_theme(THEMES[self.tkey])
         self.tb_ses = QTextBrowser()
-        der.addWidget(self.anim, 3)
+        vis = QHBoxLayout()
+        self.foto = FotoWidget()
+        vis.addWidget(self.anim, 1)
+        vis.addWidget(self.foto, 1)
+        der.addLayout(vis, 3)
         der.addWidget(self.tb_ses, 2)
         cuerpo.addLayout(der, 1)
         sl.addLayout(cuerpo, 1)
@@ -739,6 +830,7 @@ class Main(QWidget):
         e, tipo, presc = item.data(Qt.UserRole)
         clave = anim_para(e["nombre"])
         self.anim.set_anim(clave)
+        self.foto.set_foto(clave)
         h = [f"<h3>{e['nombre']}</h3>", f"<p><i>{tipo}</i></p>"]
         if presc:
             h.append(f"<p><b>{presc}</b></p>")
@@ -897,6 +989,122 @@ class Main(QWidget):
         self._estado("")
         self.mostrar_bienvenida()
 
+    # ----------------------------------------------------------- NUTRICIÓN
+    @staticmethod
+    def _racion(x):
+        ent, fr = int(x), round((x - int(x)) * 4) / 4
+        return (str(ent) if ent else "") + {0: "", 0.25: "¼", 0.5: "½", 0.75: "¾"}[fr] or "0"
+
+    def mostrar_plan_nutri(self):
+        plan, r = self.plan, self.r
+        l = QVBoxLayout(self.p_plan)
+        m = plan["macros"]
+        kpis = QHBoxLayout()
+        for v, txt in ((f"{plan['kcal']}", "kcal / día"), (f"{m['p']} g", "proteína"), (f"{plan['agua']:g} L".replace(".", ","), "agua"),
+                       (r["comidas"], "comidas")):
+            f = QFrame(objectName="kpi")
+            fl = QVBoxLayout(f)
+            a = QLabel(str(v), objectName="kpiv"); a.setAlignment(Qt.AlignCenter)
+            b = QLabel(txt, objectName="hint"); b.setAlignment(Qt.AlignCenter)
+            fl.addWidget(a); fl.addWidget(b)
+            kpis.addWidget(f)
+        l.addLayout(kpis)
+        tabs = QTabWidget()
+        l.addWidget(tabs, 1)
+
+        # Plan
+        kc = plan["kcal"]
+        pct = lambda g, k: round(g * k * 100 / kc)
+        h = ["<h3>🎯 Tu objetivo diario</h3><ul>",
+             f"<li><b>{kc} kcal</b> al día (mantenimiento ≈ {plan['mantenimiento']} kcal)</li>",
+             f"<li>Proteína <b>{m['p']} g</b> ({pct(m['p'], 4)}%) · Hidratos <b>{m['c']} g</b> ({pct(m['c'], 4)}%) · "
+             f"Grasa <b>{m['g']} g</b> ({pct(m['g'], 9)}%)</li>",
+             f"<li>Agua: <b>{plan['agua']:g} L</b> (≈ {round(plan['agua'] * 4)} vasos de 250 ml)</li>".replace(".", ",", 0),
+             ]
+        if plan["delta"]:
+            h.append(f"<li>{'Déficit' if plan['delta'] < 0 else 'Superávit'} de {abs(plan['delta'])} kcal/día: "
+                     f"ritmo previsto ≈ {str(plan['ritmo_kg_sem']).replace('.', ',')} kg/semana</li>")
+        h.append("</ul><h3>🧠 Consejos para ti</h3><ul>" + "".join(f"<li>{c}</li>" for c in plan["consejos"]) + "</ul>")
+        h.append(f"<p><i>⚠️ {plan['aviso']}</i></p>")
+        tb = QTextBrowser()
+        tb.setHtml("".join(h))
+        tabs.addTab(tb, "🍽️ Plan")
+
+        # Menú
+        h = [f"<p><i>Raciones ajustadas a las calorías de cada comida. Tu dieta: {r['dieta']}.</i></p>"]
+        for c in plan["comidas"]:
+            h.append(f"<h3>🕗 {c['hora']} · {c['nombre']} — {c['kcal']} kcal</h3><ul>")
+            for o in c["opciones"]:
+                h.append(f"<li>{o['nombre']} — <b>{self._racion(o['racion'])} ración</b> "
+                         f"(≈ {o['kcal']} kcal · P {o['p']} · H {o['c']} · G {o['g']})</li>")
+            h.append("</ul>")
+        tb2 = QTextBrowser()
+        tb2.setHtml("".join(h))
+        tabs.addTab(tb2, "📋 Menú")
+
+        # Hoy
+        w = QWidget(); gl = QVBoxLayout(w)
+        self.lbl_agua = QLabel("", objectName="pregunta")
+        fila = QHBoxLayout()
+        bm = QPushButton("− 1 vaso"); bm.clicked.connect(lambda: self._agua(-1))
+        bp = QPushButton("+ 1 vaso 💧"); bp.clicked.connect(lambda: self._agua(1))
+        fila.addWidget(bm); fila.addWidget(bp)
+        self.pb_agua = QProgressBar()
+        gl.addWidget(self.lbl_agua); gl.addLayout(fila); gl.addWidget(self.pb_agua)
+        gl.addWidget(QLabel("Comidas de hoy", objectName="hint"))
+        self.chk = []
+        for i, c in enumerate(plan["comidas"]):
+            cb = QCheckBox(f"{c['hora']} · {c['nombre']} ({c['kcal']} kcal)")
+            cb.toggled.connect(lambda v, k=i: self._comida(k, v))
+            gl.addWidget(cb)
+            self.chk.append(cb)
+        gl.addStretch()
+        tabs.addTab(w, "💧 Hoy")
+        self._pintar_hoy()
+
+        # Más
+        w = QWidget(); ml = QVBoxLayout(w)
+        b1 = QPushButton("⬇️ Guardar plan en Markdown"); b1.clicked.connect(self.exportar)
+        b2 = QPushButton("🔁 Rehacer solo las preguntas de nutrición"); b2.clicked.connect(lambda: self.rehacer(False))
+        b3 = QPushButton("🔄 Rehacer el quiz completo"); b3.clicked.connect(lambda: self.rehacer(True))
+        b4 = QPushButton("👤 Cambiar de usuario"); b4.clicked.connect(self.cambiar_usuario)
+        b5 = QPushButton("🔗 Copiar código para vincular la web con mi Drive"); b5.clicked.connect(self.copiar_codigo)
+        for b in (b1, b2, b3, b4, b5):
+            ml.addWidget(b)
+        ml.addStretch()
+        tabs.addTab(w, "⚙️ Más")
+        self.stack.setCurrentWidget(self.p_plan)
+
+    def _hoy(self):
+        log = self.sec.setdefault("log", {})
+        d = log.setdefault(date.today().isoformat(), {})
+        if not isinstance(d, dict):
+            d = log[date.today().isoformat()] = {}
+        d.setdefault("agua", 0)
+        d.setdefault("comidas", [False] * len(self.plan["comidas"]))
+        return d
+
+    def _pintar_hoy(self):
+        d = self._hoy()
+        meta = round(self.plan["agua"] * 4)
+        self.lbl_agua.setText(f"💧 {d['agua']} / {meta} vasos")
+        self.pb_agua.setRange(0, meta)
+        self.pb_agua.setValue(min(meta, d["agua"]))
+        for cb, v in zip(self.chk, d["comidas"]):
+            cb.blockSignals(True)
+            cb.setChecked(bool(v))
+            cb.blockSignals(False)
+
+    def _agua(self, delta):
+        d = self._hoy()
+        d["agua"] = max(0, d["agua"] + delta)
+        self._guardar()
+        self._pintar_hoy()
+
+    def _comida(self, i, v):
+        self._hoy()["comidas"][i] = bool(v)
+        self._guardar()
+
     # ---- progreso
     def pintar_progreso(self):
         log = self.sec.setdefault("log", {})
@@ -925,6 +1133,15 @@ class Main(QWidget):
         if not ruta:
             return
         md = [f"# Plan de {MODOS[self.modo]['label']} ({self.plan['creado']})"]
+        if self.es_nutri:
+            pl, m = self.plan, self.plan["macros"]
+            md += [f"\n**{pl['kcal']} kcal/día** · P {m['p']} g · H {m['c']} g · G {m['g']} g · agua {pl['agua']} L"]
+            for c in pl["comidas"]:
+                md.append(f"\n## {c['hora']} {c['nombre']} ({c['kcal']} kcal)")
+                md += [f"- {o['nombre']}: {self._racion(o['racion'])} ración (≈ {o['kcal']} kcal)" for o in c["opciones"]]
+            md += ["\n## Consejos"] + [f"- {c}" for c in pl["consejos"]] + [f"\n_{pl['aviso']}_"]
+            Path(ruta).write_text("\n".join(md), encoding="utf8")
+            return
         semanas = range(1, self.plan["semanas"] + 1) if self.es_gym else [1]
         for sem in semanas:
             md.append(f"\n# {titulo_semana(sem) if self.es_gym else 'Semana 1'}")

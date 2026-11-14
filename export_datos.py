@@ -7,6 +7,7 @@ from pathlib import Path
 import calistenia as app
 import ejercicios as ej
 import gym
+import nutricion as nu
 import plan
 from animaciones import ANIMS, REGLAS, REGLAS_GYM
 
@@ -25,6 +26,12 @@ def main():
         "NOMBRES_DIAS": plan.NOMBRES_DIAS,
         "DISTRIBUCION": {str(k): v for k, v in plan.DISTRIBUCION.items()},
         "ESTRUCTURA_CALIS": {str(d): [[n, p] for n, p in plan._estructura(d)] for d in range(2, 7)},
+        "FOTOS": {k: [f"fotos/{k}_0.jpg", f"fotos/{k}_1.jpg"] for k in ANIMS
+                  if (AQUI / "docs" / "fotos" / f"{k}_0.jpg").exists() and (AQUI / "docs" / "fotos" / f"{k}_1.jpg").exists()},
+        "NUTRI": {"FRECUENCIA": nu.FRECUENCIA, "AJUSTE": nu.AJUSTE, "PROTEINA_GKG": nu.PROTEINA_GKG,
+                  "FACTOR_DIA": nu.FACTOR_DIA, "BASAL_SEXO": nu.BASAL_SEXO, "MINIMO_KCAL": nu.MINIMO_KCAL,
+                  "COMIDAS": {str(k): v for k, v in nu.COMIDAS.items()}, "HORA_DESAYUNO": nu.HORA_DESAYUNO,
+                  "MENUS": nu.MENUS, "ANTOJOS": nu.ANTOJOS, "AVISO": nu.AVISO},
         "ZONA_PATRONES": plan.ZONA_PATRONES,
         "SENTADILLAS": plan.SENTADILLAS,
         "ZONA_SLOTS": gym.ZONA_SLOTS,

@@ -208,9 +208,11 @@
   // ------------------------------------------------------------ quiz
   function iniciarQuiz(completo) {
     const perfil = datos.perfil;
-    const claves = perfil && !completo ? D.SOLO_MODO[modo] : D.ORDEN[modo];
+    const usa = !!(perfil && !completo);
+    const cubierta = (k) => k.startsWith("info") || (k === "datos" ? ("altura" in perfil && "peso" in perfil) : k in perfil);
+    const claves = D.ORDEN[modo].filter((k) => !(usa && cubierta(k)));
     preguntas = claves.map((k) => D.PREG[k]);
-    reutiliza = !!(perfil && !completo);
+    reutiliza = usa;
     paso = 0; resp = {};
     mostrarPregunta();
   }
@@ -252,15 +254,21 @@
     if (paso + 1 < preguntas.length) { paso++; mostrarPregunta(); } else iniciarCarga();
   }
 
+  const PASOS = {
+    calistenia: ["Perfil y objetivo", "Nivel de fuerza (flexiones, dominadas, sentadillas)", "Estilo de vida y descanso", "Medidas y meta de peso", "Construyendo tu plan de 4 semanas"],
+    gym: ["Perfil y objetivo", "Nivel de fuerza (flexiones, dominadas, sentadillas)", "Estilo de vida y descanso", "Medidas y meta de peso", "Construyendo tu plan de 12 semanas"],
+    nutricion: ["Perfil y objetivo", "Gasto de energía (metabolismo)", "Hábitos de comida y agua", "Medidas y meta de peso", "Calculando calorías, macros y menús"],
+  };
   function iniciarCarga() {
-    view.innerHTML = `<div class="centro" style="padding:60px 0"><div class="pregunta" id="lt">🔎 Analizando tus respuestas…</div>
-      <div class="barra"><i id="lb" style="width:0"></i></div></div>`;
-    const fases = [[25, "🧮 Calculando tu nivel…"], [55, "🔗 Eligiendo ejercicios…"], [85, "📅 Organizando tus semanas…"], [100, "🎉 ¡Plan listo!"]];
+    nav.style.display = "none";
+    view.innerHTML = `<div class="centro"><div class="pregunta" style="text-align:center">🔎 Analizando tus respuestas…</div><canvas class="analisis" id="an"></canvas></div>`;
+    let pct = 0;
     const id = setInterval(() => {
-      const [pct, txt] = fases.shift();
-      $("#lb").style.width = pct + "%"; $("#lt").textContent = txt;
-      if (!fases.length) { clearInterval(id); setTimeout(terminarCarga, 500); }
-    }, 650);
+      pct += 1.2;
+      if (!$("#an")) { clearInterval(id); return; }
+      Graficas.anillo($("#an"), Math.min(100, pct), PASOS[modo], D.THEMES[tkey]);
+      if (pct >= 100) { clearInterval(id); setTimeout(terminarCarga, 450); }
+    }, 45);
   }
 
   function terminarCarga() {
@@ -272,16 +280,44 @@
     datos.perfil = perfil;
     const todo = Object.assign({}, perfil);
     for (const [k, v] of Object.entries(rr)) if (!D.PERFIL_KEYS.includes(k)) todo[k] = v;
-    const p = modo === "gym" ? L.generarPlanGym(todo) : L.generarPlan(todo);
+    const p = modo === "gym" ? L.generarPlanGym(todo) : modo === "nutricion" ? L.generarPlanNutricion(todo) : L.generarPlan(todo);
     p.creado = L.hoy();
     datos[modo] = { plan: p, log: {} };
     guardar();
-    mostrarPlan();
+    mostrarResultado();
+  }
+
+  /** Pantalla final con las gráficas de progreso previsto. */
+  function mostrarResultado() {
+    nav.style.display = "none";
+    const pl = sec().plan, rr = pl.resumen, t = D.THEMES[tkey];
+    const proy = L.proyeccionPeso(rr);
+    const g = [];
+    if (proy) {
+      const nota = (proy.alcanza ? `Meta de ${String(proy.meta).replace(".", ",")} kg hacia la semana ${proy.semanas} a un ritmo saludable. `
+        : `A ritmo saludable en 52 semanas llegarías a ${String(proy.puntos[proy.puntos.length - 1][1]).replace(".", ",")} kg. `) + "Estimación orientativa.";
+      g.push(["Graficas.linea", { titulo: "Tu peso previsto", puntos: proy.puntos, unidad_y: "kg", nota }]);
+    }
+    if (pl.tipo === "nutricion") {
+      const m = pl.macros;
+      g.push(["Graficas.barras", { titulo: "Reparto de tus calorías (kcal)", valores: [m.p * 4, m.c * 4, m.g * 9], etiquetas: ["Proteína", "Hidratos", "Grasa"],
+        nota: `Objetivo diario: ${pl.kcal} kcal · agua ${String(pl.agua).replace(".", ",")} L` }]);
+    } else {
+      const v = L.cargaSemanal(pl);
+      g.push(["Graficas.barras", { titulo: "Series por semana (tu progresión)", valores: v, etiquetas: v.map((_, i) => String(i + 1)),
+        resaltar: v.map((_, i) => i).filter((i) => (i + 1) % 4 === 0), nota: "Las barras claras son semanas de descarga: bajas el volumen para recuperar." }]);
+    }
+    view.innerHTML = `<div class="pregunta" style="text-align:center">🎉 ¡Tu plan está listo!</div>` +
+      g.map((_, i) => `<canvas class="graf" id="g${i}"></canvas>`).join("") + `<button class="btn" id="ver" style="width:100%">Ver mi plan →</button>`;
+    g.forEach(([fn, d], i) => Graficas[fn.split(".")[1]]($("#g" + i), d, t));
+    $("#ver").onclick = mostrarPlan;
   }
 
   // ------------------------------------------------------------ plan
   function mostrarPlan() {
+    nav.style.display = "";
     plan = sec().plan; r = plan.resumen; esGym = plan.tipo === "gym";
+    if (plan.tipo === "nutricion") return mostrarPlanNutri();
     const imc = r.peso / Math.pow(r.altura / 100, 2);
     const kp = [[r.dias, "días / semana"], [r.duracion + " min", "por sesión"], [plan.semanas, "semanas"], [imc.toFixed(1), "IMC"]];
     view.innerHTML = `<div class="kpis">${kp.map(([v, t]) => `<div class="kpi"><b>${v}</b><span class="hint">${t}</span></div>`).join("")}</div>
@@ -326,6 +362,51 @@
     return h;
   }
 
+  // ---- nutrición
+  const FR = { 0: "", 0.25: "¼", 0.5: "½", 0.75: "¾" };
+  function racion(x) { const e = Math.floor(x), f = Math.round((x - e) * 4) / 4; return (e ? String(e) : "") + FR[f] || "0"; }
+
+  function mostrarPlanNutri() {
+    const m = plan.macros, kc = plan.kcal;
+    const kp = [[kc, "kcal / día"], [m.p + " g", "proteína"], [String(plan.agua).replace(".", ",") + " L", "agua"], [r.comidas, "comidas"]];
+    const pct = (g, k) => Math.round(g * k * 100 / kc);
+    let h0 = `<h3>🎯 Tu objetivo diario</h3><ul><li><b>${kc} kcal</b> al día (mantenimiento ≈ ${plan.mantenimiento} kcal)</li>
+      <li>Proteína <b>${m.p} g</b> (${pct(m.p, 4)}%) · Hidratos <b>${m.c} g</b> (${pct(m.c, 4)}%) · Grasa <b>${m.g} g</b> (${pct(m.g, 9)}%)</li>
+      <li>Agua: <b>${String(plan.agua).replace(".", ",")} L</b> (≈ ${Math.round(plan.agua * 4)} vasos de 250 ml)</li>`;
+    if (plan.delta) h0 += `<li>${plan.delta < 0 ? "Déficit" : "Superávit"} de ${Math.abs(plan.delta)} kcal/día: ritmo previsto ≈ ${String(plan.ritmo_kg_sem).replace(".", ",")} kg/semana</li>`;
+    h0 += `</ul><h3>🧠 Consejos para ti</h3><ul>${plan.consejos.map((c) => `<li>${esc(c)}</li>`).join("")}</ul><p><i>⚠️ ${esc(plan.aviso)}</i></p>`;
+    let h1 = `<p><i>Raciones ajustadas a las calorías de cada comida. Tu dieta: ${esc(r.dieta)}.</i></p>`;
+    for (const c of plan.comidas) {
+      h1 += `<h3>🕗 ${c.hora} · ${esc(c.nombre)} — ${c.kcal} kcal</h3><ul>` +
+        c.opciones.map((o) => `<li>${esc(o.nombre)} — <b>${racion(o.racion)} ración</b> (≈ ${o.kcal} kcal · P ${o.p} · H ${o.c} · G ${o.g})</li>`).join("") + "</ul>";
+    }
+    view.innerHTML = `<div class="kpis">${kp.map(([v, t]) => `<div class="kpi"><b>${v}</b><span class="hint">${t}</span></div>`).join("")}</div>
+      <div class="tabs" id="tabs"><button data-t="0">🍽️ Plan</button><button data-t="1">📋 Menú</button><button data-t="2">💧 Hoy</button><button data-t="3">⚙️ Más</button></div>
+      <div id="t0" class="caja">${h0}</div><div id="t1" class="caja" hidden>${h1}</div><div id="t2" hidden></div><div id="t3" hidden></div>`;
+    $("#tabs").querySelectorAll("button").forEach((b) => (b.onclick = () => verTab(+b.dataset.t)));
+    pintarHoy(); initMas();
+    verTab(modoTab);
+  }
+
+  function hoyNutri() {
+    const log = (sec().log = sec().log || {});
+    let d = log[L.hoy()];
+    if (!d || typeof d !== "object") d = log[L.hoy()] = {};
+    if (d.agua === undefined) d.agua = 0;
+    if (!d.comidas) d.comidas = plan.comidas.map(() => false);
+    return d;
+  }
+  function pintarHoy() {
+    const d = hoyNutri(), meta = Math.round(plan.agua * 4);
+    $("#t2").innerHTML = `<div class="caja"><div class="pregunta" style="margin-top:0">💧 ${d.agua} / ${meta} vasos</div>
+      <div class="barra"><i style="width:${Math.min(100, d.agua / meta * 100)}%"></i><span>${d.agua} de ${meta} vasos</span></div>
+      <div class="vasos"><button class="btn" id="vm">− 1 vaso</button><button class="btn" id="vp">+ 1 vaso 💧</button></div>
+      <p class="hint">Comidas de hoy</p>${plan.comidas.map((c, i) => `<label class="chk"><input type="checkbox" data-i="${i}" ${d.comidas[i] ? "checked" : ""}> ${c.hora} · ${esc(c.nombre)} (${c.kcal} kcal)</label>`).join("")}</div>`;
+    $("#vm").onclick = () => { d.agua = Math.max(0, d.agua - 1); guardar(); pintarHoy(); };
+    $("#vp").onclick = () => { d.agua += 1; guardar(); pintarHoy(); };
+    $("#t2").querySelectorAll("input[type=checkbox]").forEach((c) => (c.onchange = () => { d.comidas[+c.dataset.i] = c.checked; guardar(); }));
+  }
+
   // ---- sesiones
   function htmlSesiones() {
     const semanas = [];
@@ -333,7 +414,7 @@
     const dias = D.NOMBRES_DIAS.filter((d) => plan.calendario[d]).map((d) => `<option>${d}</option>`);
     return `<div class="fila"><select id="selSem" style="flex:3">${semanas.join("")}</select><select id="selDia" style="flex:2">${dias.join("")}</select></div>
       <div class="ses"><ul class="lista" id="lista"></ul>
-      <div class="der"><canvas class="anim" id="cv"></canvas><div class="caja" id="det"></div></div></div>`;
+      <div class="der"><div class="vis" id="vis"><canvas class="anim" id="cv"></canvas><div class="foto" id="foto" hidden><img id="f0" alt=""><img id="f1" alt=""><small>Fotos: Free Exercise DB · dominio público</small></div></div><div class="caja" id="det"></div></div></div>`;
   }
 
   let entradasAct = [];
@@ -395,6 +476,10 @@
     const [, , e, tipo, presc] = entradasAct[i];
     const clave = L.animPara(e.nombre);
     anim.setAnim(clave);
+    const fotos = clave && D.FOTOS[clave];
+    $("#foto").hidden = !fotos;
+    $("#vis").classList.toggle("solo", !fotos);
+    if (fotos) { $("#f0").src = fotos[0]; $("#f1").src = fotos[1]; }
     let h = `<h3>${esc(e.nombre)}</h3><p><i>${esc(tipo)}</i></p>`;
     if (presc) h += `<p><b>${esc(presc)}</b></p>`;
     if (clave) h += `<p><b>Cómo se hace:</b> ${esc(D.ANIMS[clave].texto)}</p>`;
@@ -426,7 +511,7 @@
       <button class="btn" id="bExp">💾 Exportar mis datos (.json)</button>
       <button class="btn" id="bImp">📂 Importar mis datos (.json)</button>
       <input type="file" id="fImp" accept=".json,application/json" hidden>
-      <button class="btn" id="bPar">🔁 Cambiar solo días y tiempo (mantengo mi perfil)</button>
+      <button class="btn" id="bPar">${modo === "nutricion" ? "🔁 Rehacer solo las preguntas de nutrición" : "🔁 Cambiar solo días y tiempo (mantengo mi perfil)"}</button>
       <button class="btn" id="bTodo">🔄 Rehacer el quiz completo</button>
       <button class="btn" id="bUsu">👤 Cambiar de usuario</button>
       ${Sync.origen === "apk" ? `<p class="hint">☁️ Drive activo en esta app.</p>`
@@ -443,6 +528,16 @@
     if ($("#bDesv")) $("#bDesv").onclick = () => { Sync.desvincular(); setEstado("Drive desvinculado"); initMas(); };
     $("#bMd").onclick = () => {
       const md = [`# Plan de ${D.MODOS[modo].label} (${plan.creado})`];
+      if (plan.tipo === "nutricion") {
+        const m = plan.macros;
+        md.push(`\n**${plan.kcal} kcal/día** · P ${m.p} g · H ${m.c} g · G ${m.g} g · agua ${plan.agua} L`);
+        for (const c of plan.comidas) {
+          md.push(`\n## ${c.hora} ${c.nombre} (${c.kcal} kcal)`);
+          for (const o of c.opciones) md.push(`- ${o.nombre}: ${racion(o.racion)} ración (≈ ${o.kcal} kcal)`);
+        }
+        md.push("\n## Consejos", ...plan.consejos.map((c) => "- " + c), `\n_${plan.aviso}_`);
+        return descargar(`plan_${modo}.md`, md.join("\n"), "text/markdown");
+      }
       const semanas = esGym ? [...Array(plan.semanas).keys()].map((x) => x + 1) : [1];
       for (const sem of semanas) {
         md.push(`\n# ${esGym ? L.tituloSemana(sem) : "Semana 1"}`);

@@ -5,6 +5,10 @@ Planes de entrenamiento personalizados con un quiz y **animaciones de cada ejerc
 - **💪 Calistenia**: plan de 4 semanas según tu nivel, material, días y tiempo.
 - **🥦 GymBrocoli**: plan de gimnasio de 12 semanas en 3 fases (adaptación → construcción → intensificación),
   con semana de descarga cada 4 y sesiones separadas en **musculación, abdominales y cardio**.
+- **🥗 Nutrición**: calorías, proteína/hidratos/grasa, agua, horarios y menús (omnívora, vegetariana o vegana) según tu cuerpo
+  y tu objetivo, con contador diario de agua y comidas. Orientativo: no sustituye a un médico ni a un dietista.
+
+Tras el quiz, una pantalla de «analizando tus respuestas» muestra el progreso previsto (peso y series por semana).
 
 Si ya hiciste el test de una modalidad, la otra solo te pregunta lo que le falta (días y tiempo).
 
@@ -18,6 +22,11 @@ Si ya hiciste el test de una modalidad, la otra solo te pregunta lo que le falta
 
 Al empezar te pregunta tu **nombre y edad**; con ellos se nombra y se encuentra tu archivo en Drive.
 
+## Créditos
+
+- Fotos de los ejercicios (posición inicial y final): [Free Exercise DB](https://github.com/yuhonas/free-exercise-db), dominio público (Unlicense).
+- El quiz se inspira en la estructura de preguntas de quiz.betterme.world (solo ideas de flujo; no se copian textos, imágenes ni animaciones).
+
 ## Estructura
 
 ```
@@ -25,6 +34,9 @@ calistenia.py       app de escritorio (interfaz)
 plan.py  gym.py     generadores de los planes (calistenia / gimnasio)
 ejercicios.py       catálogo de calistenia y progresiones
 animaciones*.py     muñecos animados de cada ejercicio
+nutricion.py        plan de nutrición
+progreso.py graficas.py   datos y gráficas de la pantalla final
+fotos_ejercicios.py descarga las fotos (docs/fotos)
 drive.py            sincronización con Drive (rclone)
 export_datos.py     genera docs/data.js a partir de los datos de Python
 docs/               versión web (la que publica GitHub Pages)

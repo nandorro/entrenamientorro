@@ -246,6 +246,106 @@
   };
   L.hoy = () => L.ahora().slice(0, 10);
 
+  // ------------------------------------------------------------ nutrición (port de nutricion.py)
+  const rd = (x, nd) => { const f = Math.pow(10, nd || 0); return Math.floor(x * f + 0.5) / f; };
+  L.rd = rd;
+  const hora = (h) => {
+    let m = rd((h - Math.floor(h)) * 60), hh = Math.floor(h);
+    if (m === 60) { hh += 1; m = 0; }
+    return String(hh).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+  };
+
+  L.generarPlanNutricion = function (r) {
+    const N = D.NUTRI;
+    const sexo = r.sexo || "otro";
+    const peso = r.peso, altura = r.altura, edad = r.edad, obj = r.objetivo;
+    const dieta = r.dieta || "omnivora";
+    const n = parseInt(r.comidas === undefined ? 4 : r.comidas, 10);
+    const fr = N.FRECUENCIA[r.actual === undefined ? "3-4" : r.actual];
+    const diasEnt = Math.max(fr === undefined ? 3 : fr, r.dias || 0, r.gym_dias || 0);
+    const basal = 10 * peso + 6.25 * altura - 5 * edad + N.BASAL_SEXO[sexo];
+    let mant = basal * N.FACTOR_DIA[r.dia || "moderado"] + diasEnt * 250 / 7;
+    const ajuste = edad < 18 ? 0.0 : N.AJUSTE[obj];
+    let kcal = mant * (1 + ajuste), limitado = false;
+    if (ajuste < 0) {
+      const suelo = Math.max(mant * 0.75, N.MINIMO_KCAL[sexo]);
+      if (kcal < suelo) { kcal = suelo; limitado = true; }
+    }
+    kcal = rd(kcal / 10) * 10;
+    mant = rd(mant / 10) * 10;
+    let prot = rd(peso * N.PROTEINA_GKG[obj]);
+    prot = Math.min(prot, rd(kcal * 0.35 / 4));
+    const grasa = rd(Math.max(peso * 0.6, kcal * 0.25 / 9));
+    const hidr = Math.max(0, rd((kcal - prot * 4 - grasa * 9) / 4));
+    const agua = Math.min(4.0, Math.max(1.5, rd((peso * 35 + (diasEnt > 0 ? 500 : 0)) / 100) / 10));
+    const inicio = N.HORA_DESAYUNO[r.desayuno || "7-9"];
+    const comidas = [];
+    for (const [nombre, pct, tipo, desfase] of N.COMIDAS[String(n)]) {
+      const k = rd(kcal * pct);
+      const opciones = N.MENUS[dieta][tipo].map(([on, ok, op, oc, og]) => {
+        const racion = Math.min(2.0, Math.max(0.5, rd(k / ok * 4) / 4));
+        return { nombre: on, racion, kcal: rd(ok * racion), p: rd(op * racion), c: rd(oc * racion), g: rd(og * racion) };
+      });
+      comidas.push({ nombre, hora: hora(inicio + desfase), kcal: k, opciones });
+    }
+    const consejos = [
+      "Pon una fuente de proteína en cada comida (huevo, legumbres, pescado, lácteos, tofu…): sacia y protege el músculo.",
+      "La mitad del plato, verduras; un cuarto proteína y un cuarto hidratos integrales.",
+    ];
+    if (r.agua === "<3" || r.agua === "3-5") {
+      consejos.push(`Hoy bebes poco: sube hasta ${String(agua).replace(".", ",")} L al día (vasos de 250 ml). Un vaso al levantarte y otro antes de cada comida.`);
+    }
+    for (const a of r.antojos || []) if (N.ANTOJOS[a]) consejos.push(N.ANTOJOS[a]);
+    if (r.registro === "no") consejos.push("Apunta lo que comes durante 7 días (cuaderno o app): ver los datos suele corregir más que cualquier regla.");
+    if (r.sueno === "<6") consejos.push("Dormir menos de 6 h aumenta el hambre y los antojos; mejorar el sueño ayuda tanto como la dieta.");
+    if (dieta === "vegana") consejos.push("Dieta vegana: la vitamina B12 hay que suplementarla (consúltalo con tu médico) y combina legumbres con cereales.");
+    else if (dieta === "vegetariana") consejos.push("Dieta vegetariana: cuida hierro y B12; toma las legumbres con algo de vitamina C (cítricos, pimiento).");
+    if (limitado) consejos.push("Hemos limitado el déficit para que no baje de un mínimo saludable; es mejor perder grasa despacio y mantener el músculo.");
+    if (edad < 18) consejos.push("Eres menor de 18: no recomendamos déficit calórico; este plan es de mantenimiento. Consulta con tu pediatra o médico.");
+    const delta = kcal - mant;
+    return {
+      tipo: "nutricion",
+      resumen: Object.assign({}, r, { dias: diasEnt, duracion: 0, comidas: n, dieta }),
+      kcal, mantenimiento: mant, basal: rd(basal), macros: { p: prot, c: hidr, g: grasa },
+      agua, ritmo_kg_sem: rd(Math.abs(delta) * 7 / 7700, 2), delta, comidas, consejos, aviso: N.AVISO, semanas: 1,
+      calendario: {}, sesiones: [], calentamiento: [], enfriamiento: [],
+    };
+  };
+
+  // ------------------------------------------------------------ gráficas finales (port de progreso.py)
+  const r1 = (x) => Math.floor(x * 10 + 0.5) / 10;
+  L.proyeccionPeso = function (r, ritmo) {
+    const po = r.peso_obj, peso = r.peso;
+    if (!po || Math.abs(po - peso) < 1) return null;
+    const diff = po - peso;
+    if (!ritmo) ritmo = diff < 0 ? 0.5 : 0.25;
+    const semanas = Math.min(52, Math.max(4, Math.ceil(Math.abs(diff) / ritmo)));
+    const f = Math.min(1.0, semanas * ritmo / Math.abs(diff));
+    const puntos = [];
+    for (let i = 0; i < 7; i++) {
+      const u = i / 6;
+      puntos.push([Math.floor(semanas * u + 0.5), r1(peso + diff * f * (1 - Math.pow(1 - u, 1.5)))]);
+    }
+    return { semanas, alcanza: f >= 1.0, inicio: peso, meta: po, puntos };
+  };
+  const series = (t) => { const m = /^\s*(\d+)/.exec(t); return m ? parseInt(m[1], 10) : 0; };
+  L.cargaSemanal = function (plan) {
+    const r = plan.resumen, out = [];
+    for (let sem = 1; sem <= plan.semanas; sem++) {
+      let total = 0;
+      for (const s of plan.sesiones) {
+        if (plan.tipo === "gym") {
+          for (const b of s.bloques) {
+            if (b.tipo === "Cardio") continue;
+            for (const ej of b.ejercicios) total += series(L.prescripcionGym(r, b, ej, L.ejercicioEn(ej, sem), sem)[0]);
+          }
+        } else for (const e of s.ejercicios) total += series(L.prescripcion(r, e, sem));
+      }
+      out.push(total);
+    }
+    return out;
+  };
+
   root.LOGIC = L;
   if (typeof module !== "undefined") module.exports = L;
 })(typeof window !== "undefined" ? window : globalThis);

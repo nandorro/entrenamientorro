@@ -1,6 +1,6 @@
 /* Service worker: red primero y, si no hay conexión, la última copia guardada (la app funciona sin internet). */
-const CACHE = "entrenamientorro-v1";
-const ARCHIVOS = ["./", "index.html", "style.css", "data.js", "logic.js", "anim.js", "drive.js", "app.js",
+const CACHE = "entrenamientorro-v2";
+const ARCHIVOS = ["./", "index.html", "style.css", "data.js", "logic.js", "anim.js", "graficas.js", "drive.js", "app.js",
   "manifest.webmanifest", "icon.svg", "icon-180.png", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", (e) => {
