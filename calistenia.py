@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QDoubleSpinBox, QFileDia
 import drive
 from animaciones import ANIMS, AnimWidget, anim_para
 from gym import (FASES, ejercicio_en, generar_plan_gym, prescripcion_gym, titulo_semana)
-from plan import NOMBRES_DIAS, generar_plan, prescripcion
+from plan import NOMBRES_DIAS, generar_plan, prescripcion, resumen_perfil
 
 AQUI = Path(__file__).resolve().parent
 DATA = AQUI / "datos.json"
@@ -186,10 +186,22 @@ PREG = {p["k"]: p for p in [
     {"k": "experiencia", "t": "¿Qué experiencia tienes entrenando?", "o": [
         ("🌱 Nunca he entrenado", "nunca"), ("🚶 Algo (menos de 6 meses)", "poco"),
         ("🏃 Entre 6 meses y 2 años", "medio"), ("🦾 Más de 2 años", "avanzado")]},
+    {"k": "info_meta", "info": True, "t": "¡Vamos a hacerlo posible!",
+     "texto": "Con un plan a tu medida, ajustado a tu nivel y a tu tiempo, avanzarás de forma constante sin pasarte horas entrenando."},
+    {"k": "actual", "t": "¿Con qué frecuencia entrenas ahora?", "o": [
+        ("😴 Nada", "nunca"), ("🚶 1-2 veces por semana", "1-2"), ("🏃 3-4 veces por semana", "3-4"),
+        ("🔥 5 o más veces", "5+")]},
     {"k": "flexiones", "t": "¿Cuántas flexiones seguidas puedes hacer?", "o": [
         ("0 – 5", "0-5"), ("6 – 15", "6-15"), ("16 – 30", "16-30"), ("Más de 30", "31+")]},
     {"k": "dominadas", "t": "¿Y cuántas dominadas?\n(si no puedes o no tienes barra, elige 0)", "o": [
         ("0", "0"), ("1 – 4", "1-4"), ("5 – 10", "5-10"), ("Más de 10", "11+")]},
+    {"k": "sentadillas", "t": "¿Cuántas sentadillas seguidas puedes hacer?", "o": [
+        ("0 – 10", "0-10"), ("11 – 25", "11-25"), ("26 – 50", "26-50"), ("Más de 50", "51+")]},
+    {"k": "info_nivel", "info": True, "t": "Así conocemos tu nivel real",
+     "texto": "Estas pruebas nos ayudan a empezar con los ejercicios correctos: ni tan fáciles que no avances, ni tan duros que te lesiones."},
+    {"k": "zonas", "t": "¿Qué zonas quieres priorizar?\n(puedes elegir varias o ninguna)", "multi": True, "o": [
+        ("Pecho", "pecho"), ("Espalda", "espalda"), ("Hombros", "hombros"), ("Brazos", "brazos"),
+        ("Abdomen", "abdomen"), ("Piernas", "piernas"), ("Glúteos", "gluteos")]},
     {"k": "equipo", "t": "¿Con qué material cuentas para calistenia?", "o": [
         ("🏠 Nada, solo mi cuerpo", "nada"), ("🪝 Barra de dominadas", "barra"),
         ("🤸 Barra + paralelas o anillas", "completo")]},
@@ -197,18 +209,26 @@ PREG = {p["k"]: p for p in [
         (f"{n} días", n) for n in (2, 3, 4, 5, 6)]},
     {"k": "duracion", "t": "¿Cuánto tiempo tienes por sesión de calistenia?", "o": [
         (f"⏱ {n} min", n) for n in (20, 30, 45, 60)]},
+    {"k": "info_estilo", "info": True, "t": "Tu día a día también cuenta",
+     "texto": "El sueño, el movimiento diario y las molestias influyen en cómo te recuperas. Lo tenemos en cuenta."},
     {"k": "limitaciones", "t": "¿Tienes alguna molestia o limitación?\n(puedes elegir varias o ninguna)",
      "multi": True, "o": [("Muñecas", "muñecas"), ("Hombros", "hombros"), ("Rodillas", "rodillas")]},
-    {"k": "datos", "t": "Tu altura y tu peso", "form": True},
+    {"k": "dia", "t": "¿Cómo es tu día típico?", "o": [
+        ("🪑 Sedentario (sentado casi todo el día)", "sedentario"), ("🚶 Moderado (de pie y andando a ratos)", "moderado"),
+        ("🏗️ Activo (físico o en movimiento)", "activo")]},
+    {"k": "sueno", "t": "¿Cuántas horas duermes normalmente?", "o": [
+        ("Menos de 6 h", "<6"), ("6 – 7 h", "6-7"), ("7 – 8 h", "7-8"), ("Más de 8 h", "8+")]},
+    {"k": "datos", "t": "Tus medidas", "form": True},
     {"k": "gym_dias", "t": "¿Cuántos días por semana irás al gimnasio?", "o": [
         (f"{n} días", n) for n in (2, 3, 4, 5, 6)]},
     {"k": "gym_duracion", "t": "¿Cuánto tiempo tienes en el gimnasio por sesión?", "o": [
         (f"⏱ {n} min", n) for n in (30, 45, 60, 75, 90)]},
 ]}
 ORDEN = {
-    "calistenia": ["objetivo", "experiencia", "flexiones", "dominadas", "equipo", "dias", "duracion",
-                   "limitaciones", "datos"],
-    "gym": ["objetivo", "experiencia", "flexiones", "dominadas", "limitaciones", "datos", "gym_dias", "gym_duracion"],
+    "calistenia": ["objetivo", "info_meta", "experiencia", "actual", "flexiones", "dominadas", "sentadillas", "info_nivel",
+                   "zonas", "equipo", "dias", "duracion", "info_estilo", "limitaciones", "dia", "sueno", "datos"],
+    "gym": ["objetivo", "info_meta", "experiencia", "actual", "flexiones", "dominadas", "sentadillas", "info_nivel",
+            "zonas", "info_estilo", "limitaciones", "dia", "sueno", "datos", "gym_dias", "gym_duracion"],
 }
 SOLO_MODO = {"calistenia": ["equipo", "dias", "duracion"], "gym": ["gym_dias", "gym_duracion"]}
 MODOS = {
@@ -216,7 +236,15 @@ MODOS = {
     "gym": dict(label="🥦 GymBrocoli", title="🥦 GymBrocoli 🥦",
                 tagline="Hierro, brócoli y progresión semana a semana."),
 }
-PERFIL_KEYS = ["objetivo", "experiencia", "flexiones", "dominadas", "limitaciones", "edad", "altura", "peso"]
+PERFIL_KEYS = ["objetivo", "experiencia", "actual", "flexiones", "dominadas", "sentadillas", "zonas", "limitaciones",
+               "dia", "sueno", "edad", "altura", "peso", "peso_obj"]
+# Bloques del quiz (como el «My Profile» de las apps de entrenamiento): se muestran en la barra de progreso
+SECCION = {"objetivo": "Perfil", "info_meta": "Perfil", "experiencia": "Perfil", "actual": "Perfil",
+           "flexiones": "Entrenamiento", "dominadas": "Entrenamiento", "sentadillas": "Entrenamiento",
+           "info_nivel": "Entrenamiento", "zonas": "Entrenamiento", "equipo": "Entrenamiento", "dias": "Entrenamiento",
+           "duracion": "Entrenamiento", "gym_dias": "Entrenamiento", "gym_duracion": "Entrenamiento",
+           "info_estilo": "Estilo de vida", "limitaciones": "Estilo de vida", "dia": "Estilo de vida",
+           "sueno": "Estilo de vida", "datos": "Medidas"}
 
 
 class Bus(QObject):
@@ -404,7 +432,7 @@ class Main(QWidget):
         barra = QProgressBar()
         barra.setRange(0, total)
         barra.setValue(self.paso)
-        barra.setFormat(f"Pregunta {self.paso + 1} de {total}")
+        barra.setFormat(f"{SECCION.get(p['k'], 'Quiz')} · {self.paso + 1} de {total}")
         self.quiz_l.addWidget(barra)
         if self.reutiliza and self.paso == 0:
             h = QLabel("✅ Ya tenemos tu perfil (objetivo, nivel y datos): solo faltan estas preguntas.",
@@ -417,16 +445,27 @@ class Main(QWidget):
         self.quiz_l.addWidget(q)
         self.quiz_l.addSpacing(8)
 
-        if p.get("form"):
+        if p.get("info"):
+            t = QLabel(p["texto"], objectName="hint")
+            t.setWordWrap(True)
+            t.setStyleSheet("font-size:16px;")
+            self.quiz_l.addWidget(t)
+            self.quiz_l.addStretch()
+            b = QPushButton("Continuar →")
+            b.clicked.connect(lambda: self.responder(None))
+            self.quiz_l.addWidget(b)
+        elif p.get("form"):
             fila = QHBoxLayout()
             self.sp_alt = QSpinBox(); self.sp_alt.setRange(120, 220); self.sp_alt.setValue(175); self.sp_alt.setSuffix(" cm")
             self.sp_peso = QDoubleSpinBox(); self.sp_peso.setRange(35, 200); self.sp_peso.setValue(75); self.sp_peso.setSuffix(" kg")
-            for etq, w in (("Altura", self.sp_alt), ("Peso", self.sp_peso)):
+            self.sp_obj = QDoubleSpinBox(); self.sp_obj.setRange(35, 200); self.sp_obj.setValue(72); self.sp_obj.setSuffix(" kg")
+            for etq, w in (("Altura", self.sp_alt), ("Peso", self.sp_peso), ("Peso objetivo", self.sp_obj)):
                 c = QVBoxLayout(); c.addWidget(QLabel(etq, objectName="hint")); c.addWidget(w); fila.addLayout(c)
             self.quiz_l.addLayout(fila)
             self.quiz_l.addStretch()
             b = QPushButton("Siguiente →" if self.paso + 1 < total else "Crear mi plan 🚀")
-            b.clicked.connect(lambda: self.responder({"altura": self.sp_alt.value(), "peso": self.sp_peso.value()}))
+            b.clicked.connect(lambda: self.responder({"altura": self.sp_alt.value(), "peso": self.sp_peso.value(),
+                                                       "peso_obj": self.sp_obj.value()}))
             self.quiz_l.addWidget(b)
         elif p.get("multi"):
             self._multi = []
@@ -454,7 +493,8 @@ class Main(QWidget):
             self.quiz_l.addWidget(a, 0, Qt.AlignLeft)
 
     def responder(self, valor):
-        self.resp[self.preguntas[self.paso]["k"]] = valor
+        if not self.preguntas[self.paso].get("info"):
+            self.resp[self.preguntas[self.paso]["k"]] = valor
         if self.paso + 1 < len(self.preguntas):
             self.paso += 1
             self.mostrar_pregunta()
@@ -599,7 +639,8 @@ class Main(QWidget):
     # ---- resumen semanal
     def _html_semana(self):
         plan = self.plan
-        h = ["<h3>Tu semana tipo</h3>"]
+        h = ["<h3>🧬 Tu perfil</h3><ul>" + "".join(f"<li>{l}</li>" for l in resumen_perfil(self.r)) + "</ul>",
+             "<h3>Tu semana tipo</h3>"]
         for dia in NOMBRES_DIAS:
             s = plan["calendario"].get(dia)
             if not s:

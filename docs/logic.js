@@ -26,7 +26,9 @@
     const exp = { nunca: 0, poco: 0, medio: 1, avanzado: 2 }[resp.experiencia];
     const nEmp = D.NIVEL_EMPUJE[resp.flexiones];
     const nTra = barra ? D.NIVEL_TRACCION[resp.dominadas] : Math.min(2, exp + (resp.dominadas !== "0" ? 1 : 0));
-    const nPier = { nunca: 0, poco: 1, medio: 2, avanzado: 3 }[resp.experiencia];
+    let nPier = { nunca: 0, poco: 1, medio: 2, avanzado: 3 }[resp.experiencia];
+    if (resp.sentadillas) nPier = D.SENTADILLAS[resp.sentadillas];
+    const prio = new Set((resp.zonas || []).flatMap((z) => D.ZONA_PATRONES[z] || []));
     const nCore = { nunca: 0, poco: 0, medio: 2, avanzado: 4 }[resp.experiencia];
     const niveles = {
       empuje: nEmp, empuje_vertical: Math.max(0, nEmp - 2), fondos: Math.max(0, nEmp - 1),
@@ -38,7 +40,8 @@
     const lesion = resp.limitaciones || [];
 
     const sesiones = [];
-    for (const [nombre, patrones] of D.ESTRUCTURA_CALIS[String(dias)]) {
+    for (const [nombre, patrones0] of D.ESTRUCTURA_CALIS[String(dias)]) {
+      const patrones = patrones0.slice().sort((a, b) => (prio.has(a) ? 0 : 1) - (prio.has(b) ? 0 : 1));
       const ejercicios = [];
       const usados = new Set();
       for (const p of patrones) {
@@ -143,6 +146,8 @@
     const dias = resp.gym_dias, minutos = resp.gym_duracion, obj = resp.objetivo;
     const lim = resp.limitaciones || [];
     const expOff = { nunca: 0, poco: 0, medio: 1, avanzado: 2 }[resp.experiencia];
+    const zonas = resp.zonas || [];
+    const prio = new Set(zonas.flatMap((z) => D.ZONA_SLOTS[z] || []));
     const sesiones = [];
     D.ESTRUCTURA_GYM[obj][String(dias)].forEach(([clave, conAbs, cardio], i) => {
       let tAbs = conAbs ? 10 : 0, tCardio;
@@ -152,9 +157,9 @@
       const bloques = [];
       if (clave) {
         const n = Math.max((tAbs || tCardio) ? 2 : 3, Math.min(8, Math.floor(tFuerza / 9)));
-        bloques.push({ tipo: "Musculación", titulo: D.NOMBRES_SLOTS[clave], ejercicios: bloqueFuerza(D.SLOTS[clave], n, expOff, lim) });
+        bloques.push({ tipo: "Musculación", titulo: D.NOMBRES_SLOTS[clave], ejercicios: bloqueFuerza(D.SLOTS[clave].slice().sort((a, b) => (prio.has(a) ? 0 : 1) - (prio.has(b) ? 0 : 1)), n, expOff, lim) });
       }
-      if (conAbs) bloques.push({ tipo: "Abdominales", titulo: "Abdominales y core", ejercicios: bloqueAbs(tAbs >= 12 ? 4 : 3, expOff, lim) });
+      if (conAbs) bloques.push({ tipo: "Abdominales", titulo: "Abdominales y core", ejercicios: bloqueAbs((tAbs >= 12 || zonas.includes("abdomen")) ? 4 : 3, expOff, lim) });
       if (cardio) bloques.push({ tipo: "Cardio", titulo: `Cardio ${cardio}`, modo: cardio, minutos: tCardio, ejercicios: bloqueCardio(cardio, lim, i) });
       sesiones.push({ nombre: clave ? D.NOMBRES_SLOTS[clave] : "Cardio y abdominales", bloques });
     });
@@ -206,6 +211,28 @@
     else rir = D.RIR_GYM[f][w] ? `RIR ${D.RIR_GYM[f][w]}` : "al fallo técnico (última serie)";
     const descanso = compuesto ? { musculo: 90, fuerza: 150, grasa: 60, general: 90 }[resp.objetivo] : 60;
     return [`${series} × ${lo}-${hi} reps · ${rir}`, descanso];
+  };
+
+  // ------------------------------------------------------------ perfil (port de plan.resumen_perfil)
+  L.resumenPerfil = function (r) {
+    const out = [];
+    const imc = r.peso / Math.pow(r.altura / 100, 2);
+    const cat = imc < 18.5 ? "bajo peso" : imc < 25 ? "peso normal" : imc < 30 ? "sobrepeso" : "obesidad";
+    out.push(`IMC ${(Math.floor(imc * 10 + 0.5) / 10).toFixed(1)} (${cat})`);
+    const po = r.peso_obj;
+    if (po && Math.abs(po - r.peso) >= 1) {
+      const diff = po - r.peso, a = Math.abs(diff);
+      const lo = Math.round(a / 0.5), hi = Math.round(a / 0.25);
+      const g = (n) => String(+n.toFixed(2)).replace(".", ",");
+      out.push(`Meta: ${g(po)} kg (${diff > 0 ? "+" : "−"}${g(a)} kg). A un ritmo saludable de 0,25-0,5 kg/semana (${diff < 0 ? "perder" : "ganar"}) son unas ${lo}-${hi} semanas.`);
+    }
+    out.push("Nivel de partida: " + { nunca: "principiante", poco: "principiante", medio: "intermedio", avanzado: "avanzado" }[r.experiencia]);
+    if (r.zonas && r.zonas.length) out.push("Zonas prioritarias: " + r.zonas.join(", "));
+    if (r.sueno === "<6") out.push("Duermes poco (<6 h): es cuando más se recupera el músculo; intenta llegar a 7-8 h.");
+    if (r.dia === "sedentario") out.push("Tu día es sedentario: suma 8.000-10.000 pasos diarios además de entrenar.");
+    const dias = r.dias !== undefined ? r.dias : (r.gym_dias || 0);
+    if (r.actual === "nunca" && dias >= 5) out.push("Empiezas desde cero con muchos días: si te cuesta, empieza con 3 y sube poco a poco.");
+    return out;
   };
 
   // ------------------------------------------------------------ utilidades de datos

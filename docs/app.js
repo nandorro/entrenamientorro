@@ -217,12 +217,15 @@
 
   function mostrarPregunta() {
     const p = preguntas[paso], total = preguntas.length;
-    let h = `<div class="barra"><i style="width:${paso / total * 100}%"></i><span>Pregunta ${paso + 1} de ${total}</span></div>`;
+    let h = `<div class="barra"><i style="width:${paso / total * 100}%"></i><span>${esc(D.SECCION[p.k] || "Quiz")} · ${paso + 1} de ${total}</span></div>`;
     if (reutiliza && paso === 0) h += `<p class="hint">✅ Ya tenemos tu perfil (objetivo, nivel y datos): solo faltan estas preguntas.</p>`;
     h += `<div class="pregunta">${esc(p.t)}</div>`;
-    if (p.form) {
+    if (p.info) {
+      h += `<p class="hint" style="font-size:16px">${esc(p.texto)}</p><button class="btn" id="sig">Continuar →</button>`;
+    } else if (p.form) {
       h += `<div class="form"><label><span class="hint">Altura (cm)</span><input type="number" id="alt" min="120" max="220" value="175"></label>
-        <label><span class="hint">Peso (kg)</span><input type="number" id="peso" min="35" max="200" step="0.5" value="75"></label></div>
+        <label><span class="hint">Peso (kg)</span><input type="number" id="peso" min="35" max="200" step="0.5" value="75"></label>
+        <label><span class="hint">Peso objetivo (kg)</span><input type="number" id="pobj" min="35" max="200" step="0.5" value="72"></label></div>
         <button class="btn" id="sig">${paso + 1 < total ? "Siguiente →" : "Crear mi plan 🚀"}</button>`;
     } else if (p.multi) {
       h += p.o.map(([e, v], i) => `<button class="opcion" data-i="${i}">${esc(e)}</button>`).join("") + `<button class="btn" id="sig">Continuar →</button>`;
@@ -231,8 +234,10 @@
     }
     if (paso > 0) h += `<br><button class="atras" id="atras">← Atrás</button>`;
     view.innerHTML = h;
-    if (p.form) {
-      $("#sig").onclick = () => responder({ altura: parseInt($("#alt").value, 10) || 175, peso: parseFloat($("#peso").value) || 75 });
+    if (p.info) {
+      $("#sig").onclick = () => responder(null);
+    } else if (p.form) {
+      $("#sig").onclick = () => responder({ altura: parseInt($("#alt").value, 10) || 175, peso: parseFloat($("#peso").value) || 75, peso_obj: parseFloat($("#pobj").value) || 72 });
     } else if (p.multi) {
       view.querySelectorAll(".opcion").forEach((b) => (b.onclick = () => b.classList.toggle("on")));
       $("#sig").onclick = () => responder([...view.querySelectorAll(".opcion.on")].map((b) => p.o[+b.dataset.i][1]));
@@ -243,7 +248,7 @@
   }
 
   function responder(v) {
-    resp[preguntas[paso].k] = v;
+    if (!preguntas[paso].info) resp[preguntas[paso].k] = v;
     if (paso + 1 < preguntas.length) { paso++; mostrarPregunta(); } else iniciarCarga();
   }
 
@@ -298,7 +303,7 @@
   }
 
   function htmlSemana() {
-    let h = "<h3>Tu semana tipo</h3>";
+    let h = "<h3>🧬 Tu perfil</h3><ul>" + L.resumenPerfil(r).map((l) => `<li>${esc(l)}</li>`).join("") + "</ul><h3>Tu semana tipo</h3>";
     for (const dia of D.NOMBRES_DIAS) {
       const s = plan.calendario[dia];
       if (!s) h += `<p style="opacity:.6">${dia} — descanso 😴</p>`;

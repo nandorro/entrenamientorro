@@ -1,4 +1,5 @@
 """Generador del plan de entrenamiento a partir de las respuestas del quiz."""
+import math
 from ejercicios import PATRONES, nivel_empuje, nivel_traccion
 
 OBJETIVOS = {
@@ -7,6 +8,17 @@ OBJETIVOS = {
     "fuerza": {"reps": (4, 8), "series": 5, "descanso": 120, "cardio": False},
     "general": {"reps": (10, 15), "series": 3, "descanso": 60, "cardio": False},
 }
+# Zonas que el usuario quiere priorizar -> patrones de calistenia que se colocan primero en cada sesión
+ZONA_PATRONES = {
+    "pecho": ["empuje", "fondos", "empuje_vertical"],
+    "espalda": ["traccion", "traccion_sin_barra", "core_colgado"],
+    "hombros": ["empuje_vertical"],
+    "brazos": ["fondos", "traccion", "traccion_sin_barra"],
+    "piernas": ["piernas", "gemelos"],
+    "gluteos": ["gluteo_isquio", "piernas"],
+    "abdomen": ["core", "core_colgado", "core_rotacion"],
+}
+SENTADILLAS = {"0-10": 0, "11-25": 1, "26-50": 2, "51+": 3}
 NOMBRES_DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 DISTRIBUCION = {
     2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 3, 4], 6: [0, 1, 2, 3, 4, 5],
@@ -49,6 +61,9 @@ def generar_plan(resp: dict, semanas: int = 4) -> dict:
     n_emp = nivel_empuje(resp["flexiones"])
     n_tra = nivel_traccion(resp["dominadas"]) if barra else min(2, exp + (resp["dominadas"] != "0"))
     n_pier = {"nunca": 0, "poco": 1, "medio": 2, "avanzado": 3}[resp["experiencia"]]
+    if resp.get("sentadillas"):
+        n_pier = SENTADILLAS[resp["sentadillas"]]
+    prio = {pt for z in resp.get("zonas", []) for pt in ZONA_PATRONES.get(z, [])}
     n_core = {"nunca": 0, "poco": 0, "medio": 2, "avanzado": 4}[resp["experiencia"]]
     niveles = {
         "empuje": n_emp, "empuje_vertical": max(0, n_emp - 2), "fondos": max(0, n_emp - 1),
@@ -63,6 +78,7 @@ def generar_plan(resp: dict, semanas: int = 4) -> dict:
 
     sesiones = []
     for i, (nombre, patrones) in enumerate(_estructura(dias)):
+        patrones = sorted(patrones, key=lambda x: 0 if x in prio else 1)   # estable: primero las zonas elegidas
         ejercicios = []
         usados = set()
         for p in patrones:
@@ -131,3 +147,30 @@ def prescripcion(resp: dict, ej: dict, semana: int) -> str:
         base = {"fuerza": 20, "musculo": 25, "grasa": 30, "general": 25}[resp["objetivo"]]
         return f"{series} × {base + (semana - 1) * 5 if semana < 4 else base} s"
     return f"{series} × {lo + extra}-{hi + extra} reps" + (" (RIR 2: deja 2 en reserva)" if semana == 4 else "")
+
+
+def resumen_perfil(r: dict) -> list:
+    """Líneas del «Tu perfil» (IMC, meta de peso, nivel, zonas y hábitos), como la pantalla final de los quizzes de apps."""
+    out = []
+    imc = r["peso"] / (r["altura"] / 100) ** 2
+    cat = "bajo peso" if imc < 18.5 else "peso normal" if imc < 25 else "sobrepeso" if imc < 30 else "obesidad"
+    out.append(f"IMC {math.floor(imc * 10 + 0.5) / 10:.1f} ({cat})")  # redondeo idéntico al de la versión JS
+    po = r.get("peso_obj")
+    if po and abs(po - r["peso"]) >= 1:
+        diff = po - r["peso"]
+        lo, hi = round(abs(diff) / 0.5), round(abs(diff) / 0.25)
+        verbo = "perder" if diff < 0 else "ganar"
+        g = lambda x: f"{round(x, 2):g}".replace(".", ",")
+        out.append(f"Meta: {g(po)} kg ({'+' if diff > 0 else '−'}{g(abs(diff))} kg). A un ritmo saludable de 0,25-0,5 kg/semana "
+                   f"({verbo}) son unas {lo}-{hi} semanas.")
+    nivel = {"nunca": "principiante", "poco": "principiante", "medio": "intermedio", "avanzado": "avanzado"}[r["experiencia"]]
+    out.append(f"Nivel de partida: {nivel}")
+    if r.get("zonas"):
+        out.append("Zonas prioritarias: " + ", ".join(r["zonas"]))
+    if r.get("sueno") == "<6":
+        out.append("Duermes poco (<6 h): es cuando más se recupera el músculo; intenta llegar a 7-8 h.")
+    if r.get("dia") == "sedentario":
+        out.append("Tu día es sedentario: suma 8.000-10.000 pasos diarios además de entrenar.")
+    if r.get("actual") == "nunca" and r.get("dias", r.get("gym_dias", 0)) >= 5:
+        out.append("Empiezas desde cero con muchos días: si te cuesta, empieza con 3 y sube poco a poco.")
+    return out

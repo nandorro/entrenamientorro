@@ -133,6 +133,16 @@ NOMBRES_SLOTS = {
     "PULL": "Tracción (espalda y bíceps)",
 }
 
+# Zonas que el usuario quiere priorizar -> slots que se colocan primero en cada sesión
+ZONA_SLOTS = {
+    "pecho": ["pecho_press", "pecho_acc"],
+    "espalda": ["espalda_vert", "espalda_horiz", "espalda_horiz_b", "peso_muerto"],
+    "hombros": ["hombro_press", "hombro_lat"],
+    "brazos": ["biceps", "biceps_b", "triceps", "triceps_b"],
+    "piernas": ["cuadriceps", "femoral", "unilateral", "cuad_acc", "gemelos"],
+    "gluteos": ["gluteo", "femoral", "unilateral"],
+    "abdomen": [],
+}
 NOMBRES_DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 DISTRIBUCION = {2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 3, 4], 6: [0, 1, 2, 3, 4, 5]}
 
@@ -225,6 +235,8 @@ def generar_plan_gym(resp: dict) -> dict:
     obj = resp["objetivo"]
     lim = resp.get("limitaciones", [])
     exp_off = {"nunca": 0, "poco": 0, "medio": 1, "avanzado": 2}[resp["experiencia"]]
+    zonas = resp.get("zonas", [])
+    prio = {sl for z in zonas for sl in ZONA_SLOTS.get(z, [])}
     sesiones = []
     for i, (clave, con_abs, cardio) in enumerate(_estructura(dias, obj)):
         t_abs = 10 if con_abs else 0
@@ -238,10 +250,10 @@ def generar_plan_gym(resp: dict) -> dict:
         if clave:
             n = max(3 if not (t_abs or t_cardio) else 2, min(8, t_fuerza // 9))
             bloques.append({"tipo": "Musculación", "titulo": NOMBRES_SLOTS[clave],
-                            "ejercicios": _bloque_fuerza(SLOTS[clave], n, exp_off, lim)})
+                            "ejercicios": _bloque_fuerza(sorted(SLOTS[clave], key=lambda x: 0 if x in prio else 1), n, exp_off, lim)})
         if con_abs:
             bloques.append({"tipo": "Abdominales", "titulo": "Abdominales y core",
-                            "ejercicios": _bloque_abs(4 if t_abs >= 12 else 3, exp_off, lim)})
+                            "ejercicios": _bloque_abs(4 if (t_abs >= 12 or "abdomen" in zonas) else 3, exp_off, lim)})
         if cardio:
             bloques.append({"tipo": "Cardio", "titulo": f"Cardio {cardio}", "modo": cardio, "minutos": t_cardio,
                             "ejercicios": _bloque_cardio(cardio, lim, i)})
