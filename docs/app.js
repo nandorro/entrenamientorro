@@ -354,11 +354,12 @@
     if (esGym) {
       h += "<h3>Tus 12 semanas</h3>";
       D.FASES.forEach(([n, d], i) => { h += `<p><b>${n}</b> (semanas ${i * 4 + 1}-${i * 4 + 4})<br>${d}</p>`; });
-      h += `<p><i>En cada fase: semanas 1-3 cada vez más cerca del límite (menos repeticiones en reserva, RIR) y la semana 4 de descarga con menos series y un 10% menos de peso.</i></p>
+      h += `<p><i>En cada fase: semanas 1-3 cada vez más cerca del límite (menos repeticiones en reserva, RIR) y la semana 4 de descarga con la mitad de series y la misma carga (RIR 3).</i></p>
         <p><b>Doble progresión:</b> cuando hagas el máximo de repeticiones en todas las series con buena técnica, sube el peso (1-2 kg en tren superior, 2-5 kg en pierna).</p>`;
     } else {
       h += "<p><i>Semanas 1-3: sube reps o tiempo cada semana. Semana 4: descarga. Cuando llegues al tope de reps en todas las series, pasa al siguiente ejercicio de la progresión.</i></p>";
     }
+    h += "<h3>🩺 ¿Cuándo descargar antes?</h3><ul>" + D.SENALES.map((x) => `<li>${esc(x)}</li>`).join("") + `</ul><p><i>${esc(D.SENALES_TEXTO)}</i></p>`;
     return h;
   }
 
@@ -471,7 +472,76 @@
     elegir(primero);
   }
 
+  // ---- temporizador de descanso y registro de series (como en Hevy)
+  let timerDesc = 0;
+  function pararTimer() { clearInterval(timerDesc); timerDesc = 0; }
+  function pitar() {
+    try { const a = new (window.AudioContext || window.webkitAudioContext)(), o = a.createOscillator(); o.connect(a.destination); o.frequency.value = 880; o.start(); setTimeout(() => { o.stop(); a.close(); }, 350); } catch (e) { /* sin audio */ }
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+  }
+  function iniciarTimer(seg) {
+    pararTimer();
+    let left = seg;
+    const pinta = () => { const o = $("#tleft"); if (o) o.textContent = left > 0 ? `⏳ ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` : "¡Siguiente serie! 💪"; };
+    pinta();
+    timerDesc = setInterval(() => {
+      left--;
+      if (!$("#tleft")) { pararTimer(); return; }
+      pinta();
+      if (left <= 0) { pararTimer(); pitar(); }
+    }, 1000);
+  }
+
+  function htmlRegistro(e, tipo, presc) {
+    if (!["Musculación", "Abdominales", "Ejercicio"].includes(tipo) || !["reps", "seg"].includes(e.tipo)) return "";
+    const m = /descanso (\d+) s/.exec(presc || ""), def = m ? +m[1] : 60;
+    const segs = [...new Set([30, 45, 60, 90, 120, 150, 180, def])].sort((a, b) => a - b);
+    return `<div class="caja" id="reg" style="margin-top:10px">
+      <div class="fila"><select id="tsel">${segs.map((s) => `<option value="${s}" ${s === def ? "selected" : ""}>${s} s</option>`).join("")}</select>
+        <button class="btn" id="tgo">⏱ Descanso</button><span class="hint" id="tleft"></span></div>
+      <h4 style="margin:8px 0">📒 Registro de series</h4>
+      <div class="fila"><input type="number" id="rkg" inputmode="decimal" step="0.5" min="0" placeholder="kg (0 = peso corporal)">
+        <input type="number" id="rrep" inputmode="numeric" min="1" placeholder="${e.tipo === "seg" ? "segundos" : "repeticiones"}">
+        <select id="rtipo">${L.TIPOS_SERIE.map(([v, t]) => `<option value="${v}">${t}</option>`).join("")}</select></div>
+      <button class="btn" id="radd" style="width:100%">➕ Añadir serie</button>
+      <div id="rhoy" style="margin-top:8px"></div><div id="rhist" class="hint" style="margin-top:4px"></div>
+      <textarea class="nota" id="rnota" rows="2" placeholder="Notas de este ejercicio…"></textarea></div>`;
+  }
+
+  function initRegistro(e, presc) {
+    if (!$("#reg")) return;
+    const nombre = e.nombre;
+    const hist = () => ((sec().registro = sec().registro || {})[nombre] = (sec().registro[nombre] || {}));
+    let aviso = "";
+    const pinta = () => {
+      const h = hist(), hoy = L.hoy(), hs = h[hoy] || [], r = L.resumenRegistro(h, hoy);
+      $("#rhoy").innerHTML = hs.length ? "<b>Hoy:</b> " + hs.map((s, i) => `<span class="chip">${esc(L.fmtSerie(s))} <a href="#" data-i="${i}">✕</a></span>`).join("")
+        : `<span class="hint">Aún no has registrado series hoy.</span>`;
+      let t = aviso ? `<b>${aviso}</b><br>` : "";
+      if (r.ultimo) t += `Última vez (${r.ultimo.fecha}): ` + r.ultimo.sets.map((s) => esc(L.fmtSerie(s))).join(" · ") + "<br>";
+      if (r.mejor > 0) t += `Mejor 1RM estimado: <b>${String(r.mejor).replace(".", ",")} kg</b> (${r.fecha_mejor})` + (r.pr_hoy ? " 🏆" : "");
+      $("#rhist").innerHTML = t;
+      $("#rhoy").querySelectorAll("a").forEach((a) => (a.onclick = (ev) => { ev.preventDefault(); h[hoy].splice(+a.dataset.i, 1); if (!h[hoy].length) delete h[hoy]; aviso = ""; guardar(); pinta(); }));
+    };
+    $("#tgo").onclick = () => iniciarTimer(+$("#tsel").value);
+    $("#radd").onclick = () => {
+      const peso = Math.max(0, parseFloat($("#rkg").value) || 0), reps = parseInt($("#rrep").value, 10);
+      if (!(reps > 0)) { $("#rrep").focus(); return; }
+      const serie = { peso, reps, tipo: $("#rtipo").value }, h = hist(), hoy = L.hoy();
+      aviso = L.esPR(h, hoy, serie) ? "🏆 ¡Nuevo récord de 1RM estimado!" : "";
+      (h[hoy] = h[hoy] || []).push(serie);
+      guardar(); pinta();
+      iniciarTimer(+$("#tsel").value);   // descanso automático tras cada serie
+    };
+    const notas = (sec().notas = sec().notas || {});
+    $("#rnota").value = notas[nombre] || "";
+    let t = 0;
+    $("#rnota").oninput = () => { clearTimeout(t); t = setTimeout(() => { sec().notas[nombre] = $("#rnota").value; guardar(); }, 700); };
+    pinta();
+  }
+
   function elegir(i) {
+    pararTimer();
     $("#lista").querySelectorAll("li.ex").forEach((li) => li.classList.toggle("on", +li.dataset.i === i));
     const [, , e, tipo, presc] = entradasAct[i];
     const clave = L.animPara(e.nombre);
@@ -484,7 +554,8 @@
     if (presc) h += `<p><b>${esc(presc)}</b></p>`;
     if (clave) h += `<p><b>Cómo se hace:</b> ${esc(D.ANIMS[clave].texto)}</p>`;
     h += `<p>💡 ${esc(e.nota)}</p>`;
-    $("#det").innerHTML = h;
+    $("#det").innerHTML = h + htmlRegistro(e, tipo, presc);
+    initRegistro(e, presc);
   }
 
   // ---- progreso

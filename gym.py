@@ -6,6 +6,8 @@ Inspirado en los programas habituales de las apps de entreno (Fitbod, Hevy, Jefi
   * Sesiones separadas por bloques: Musculación, Abdominales y Cardio (LISS o HIIT).
   * Doble progresión: cuando haces el máximo de reps en todas las series, sube el peso.
 """
+import math
+
 from ejercicios import PATRONES
 
 FASES = [
@@ -113,7 +115,45 @@ CARDIO_HIIT = [
     ("Comba", "Saltos pequeños y rápidos con las muñecas.", "min"),
     ("Burpees", "Pecho al suelo y salto arriba.", "min"),
 ]
-CARDIO_SUAVE_RODILLAS = {"Carrera continua en cinta", "Sprints en cinta", "Comba", "Burpees"}
+CARDIO_SUAVE_RODILLAS = {"Carrera continua en cinta", "Sprints en cinta", "Comba", "Burpees",
+                         "Carrera continua al aire libre", "Sprints al aire libre", "Mountain climbers"}
+
+# Material que necesita cada ejercicio (el resto es «libre»: mancuernas, banco y peso corporal)
+EQUIPO_EJ = {
+    "Press de pecho en máquina": "maquina", "Jalón al pecho en polea": "maquina", "Remo en polea baja": "maquina",
+    "Extensión de tríceps en polea": "maquina", "Prensa de piernas": "maquina",
+    "Curl femoral tumbado en máquina": "maquina", "Extensión de cuádriceps en máquina": "maquina",
+    "Crunch en polea alta": "maquina",
+    "Press de banca con barra": "barra", "Remo con barra": "barra", "Press militar con barra": "barra",
+    "Curl con barra": "barra", "Sentadilla con barra": "barra", "Peso muerto rumano con barra": "barra",
+    "Hip thrust con barra": "barra", "Peso muerto con barra": "barra",
+    "Dominadas asistidas con goma": "dominadas", "Dominadas": "dominadas", "Elevación de rodillas colgado": "dominadas",
+}
+PERMITIDO = {
+    "completo": ["libre", "maquina", "barra", "dominadas"],
+    "casa_barra": ["libre", "dominadas"],
+    "casa": ["libre"],
+}
+CARDIO_CASA_LISS = [
+    ("Caminata rápida al aire libre", "Ritmo ligero-moderado; si puedes, por terreno con alguna cuesta.", "min"),
+    ("Carrera continua al aire libre", "Ritmo en el que puedas hablar.", "min"),
+]
+CARDIO_CASA_HIIT = [
+    ("Burpees", "Pecho al suelo y salto arriba.", "min"),
+    ("Comba", "Saltos pequeños y rápidos con las muñecas.", "min"),
+    ("Sprints al aire libre", "Esfuerzo fuerte en la fase rápida y camina para recuperar.", "min"),
+    ("Mountain climbers", "Caderas bajas y ritmo rápido.", "min"),
+    ("Caminata rápida con intervalos de cuesta", "Sin impacto: sube el ritmo o la pendiente en la fase fuerte.", "min"),
+]
+SENALES_DESCARGA = [
+    "Tu rendimiento baja durante varias sesiones seguidas (no solo en un día malo).",
+    "Los pesos de siempre se sienten mucho más pesados.",
+    "Tienes molestias o dolores que no se van.",
+    "Duermes peor, te recuperas peor o la motivación está por los suelos.",
+    "El agarre se te debilita antes de lo normal.",
+]
+SENALES_TEXTO = ("Si notas varias a la vez, adelanta la semana de descarga: la mitad de series con la misma carga y "
+                 "2-3 repeticiones en reserva. Mantén la proteína alta.")
 
 COMPUESTOS = {"pecho_press", "espalda_vert", "espalda_horiz", "hombro_press", "cuadriceps",
               "femoral", "peso_muerto", "unilateral", "gluteo"}
@@ -167,11 +207,13 @@ def _estructura(dias, objetivo):
             (None, True, "HIIT" if grasa else "LISS")]
 
 
-def _nivel(patron, fase, exp_off, lim):
+def _nivel(patron, fase, exp_off, lim, equipo="completo"):
     """Elige el ejercicio del patrón para una fase. Devuelve (nombre, nota, tipo) o None si no procede."""
     base = patron[:-2] if patron.endswith("_b") else patron
     delta = -1 if patron.endswith("_b") else 0
-    cadena = GYM[base]
+    cadena = [e for e in GYM[base] if EQUIPO_EJ.get(e[0], "libre") in PERMITIDO[equipo]]
+    if not cadena:
+        return None
     lvl = fase + exp_off + delta
     if base == "peso_muerto" and fase + exp_off < 1:
         return None
@@ -196,12 +238,12 @@ def _ej(patron, fase_items):
     return {"patron": patron, "niveles": [dict(nombre=n, nota=nt, tipo=t) for n, nt, t in fase_items]}
 
 
-def _bloque_fuerza(slots, n, exp_off, lim):
+def _bloque_fuerza(slots, n, exp_off, lim, equipo="completo"):
     ejercicios, vistos = [], set()
     for patron in slots:
         if len(ejercicios) >= n:
             break
-        porfase = [_nivel(patron, f, exp_off, lim) for f in range(3)]
+        porfase = [_nivel(patron, f, exp_off, lim, equipo) for f in range(3)]
         if porfase[0] is None and porfase[1] is None and porfase[2] is None:
             continue
         porfase = [p or next(x for x in porfase if x) for p in porfase]
@@ -212,17 +254,23 @@ def _bloque_fuerza(slots, n, exp_off, lim):
     return ejercicios
 
 
-def _bloque_abs(n, exp_off, lim):
+def _bloque_abs(n, exp_off, lim, equipo="completo"):
     pats = ["abs_flex", "abs_core", "abs_piernas", "abs_rot"]
     ej = []
     for patron in pats[:n]:
-        porfase = [_nivel(patron, f, exp_off, lim) for f in range(3)]
-        ej.append(_ej(patron, porfase))
+        porfase = [_nivel(patron, f, exp_off, lim, equipo) for f in range(3)]
+        if porfase[0] is None and porfase[1] is None and porfase[2] is None:
+            continue
+        first = next(x for x in porfase if x)
+        ej.append(_ej(patron, [p or first for p in porfase]))
     return ej
 
 
-def _bloque_cardio(modo, lim, k):
-    lista = CARDIO_LISS if modo == "LISS" else CARDIO_HIIT
+def _bloque_cardio(modo, lim, k, equipo="completo"):
+    if equipo == "completo":
+        lista = CARDIO_LISS if modo == "LISS" else CARDIO_HIIT
+    else:
+        lista = CARDIO_CASA_LISS if modo == "LISS" else CARDIO_CASA_HIIT
     if "rodillas" in lim:
         lista = [e for e in lista if e[0] not in CARDIO_SUAVE_RODILLAS]
     rot = lista[k % len(lista):] + lista[:k % len(lista)]
@@ -235,10 +283,14 @@ def generar_plan_gym(resp: dict) -> dict:
     obj = resp["objetivo"]
     lim = resp.get("limitaciones", [])
     exp_off = {"nunca": 0, "poco": 0, "medio": 1, "avanzado": 2}[resp["experiencia"]]
+    equipo = resp.get("gym_equipo", "completo")
+    pref = resp.get("gym_cardio", "mixto")
     zonas = resp.get("zonas", [])
     prio = {sl for z in zonas for sl in ZONA_SLOTS.get(z, [])}
     sesiones = []
     for i, (clave, con_abs, cardio) in enumerate(_estructura(dias, obj)):
+        if cardio and pref in ("LISS", "HIIT"):
+            cardio = pref
         t_abs = 10 if con_abs else 0
         if clave is None:  # día dedicado a cardio + abdominales
             t_cardio = max(20, min(45, minutos - 5 - 12))
@@ -250,13 +302,13 @@ def generar_plan_gym(resp: dict) -> dict:
         if clave:
             n = max(3 if not (t_abs or t_cardio) else 2, min(8, t_fuerza // 9))
             bloques.append({"tipo": "Musculación", "titulo": NOMBRES_SLOTS[clave],
-                            "ejercicios": _bloque_fuerza(sorted(SLOTS[clave], key=lambda x: 0 if x in prio else 1), n, exp_off, lim)})
+                            "ejercicios": _bloque_fuerza(sorted(SLOTS[clave], key=lambda x: 0 if x in prio else 1), n, exp_off, lim, equipo)})
         if con_abs:
             bloques.append({"tipo": "Abdominales", "titulo": "Abdominales y core",
-                            "ejercicios": _bloque_abs(4 if (t_abs >= 12 or "abdomen" in zonas) else 3, exp_off, lim)})
+                            "ejercicios": _bloque_abs(4 if (t_abs >= 12 or "abdomen" in zonas) else 3, exp_off, lim, equipo)})
         if cardio:
             bloques.append({"tipo": "Cardio", "titulo": f"Cardio {cardio}", "modo": cardio, "minutos": t_cardio,
-                            "ejercicios": _bloque_cardio(cardio, lim, i)})
+                            "ejercicios": _bloque_cardio(cardio, lim, i, equipo)})
         nombre = NOMBRES_SLOTS[clave] if clave else "Cardio y abdominales"
         sesiones.append({"nombre": nombre, "bloques": bloques})
     calendario = {NOMBRES_DIAS[d]: sesiones[k] for k, d in enumerate(DISTRIBUCION[dias])}
@@ -267,7 +319,8 @@ def generar_plan_gym(resp: dict) -> dict:
         "sesiones": sesiones,
         "calendario": calendario,
         "calentamiento": [
-            dict(nombre="Caminata en cinta inclinada (5 min suaves)", nota="Sube el pulso y calienta articulaciones.", tipo="min"),
+            dict(nombre="Caminata en cinta inclinada (5 min suaves)" if equipo == "completo" else "Caminata rápida en el sitio (5 min)",
+                 nota="Sube el pulso y calienta articulaciones.", tipo="min"),
             dict(nombre=PATRONES["movilidad"][0][0], nota=PATRONES["movilidad"][0][2], tipo="reps"),
             dict(nombre=PATRONES["movilidad"][3][0], nota=PATRONES["movilidad"][3][2], tipo="reps"),
         ],
@@ -332,8 +385,8 @@ def prescripcion_gym(resp, bloque, ej, ej_real, semana):
     lo, hi = _REPS[resp["objetivo"]][f][0 if compuesto else 1]
     series = _SERIES[resp["objetivo"]][f] if compuesto else max(2, _SERIES[resp["objetivo"]][f] - 1)
     if desc:
-        series = max(2, series - 1)
-        rir = "RIR 4 · baja el peso un 10%"
+        series = max(2, math.ceil(series / 2))   # descarga: ~la mitad de series con la misma carga
+        rir = "RIR 3 · misma carga, la mitad de series"
     else:
         rir = f"RIR {_RIR[f][w]}" if _RIR[f][w] else "al fallo técnico (última serie)"
     descanso = {"musculo": 90, "fuerza": 150, "grasa": 60, "general": 90}[resp["objetivo"]] if compuesto else 60

@@ -80,13 +80,13 @@
     const [lo, hi] = obj.reps;
     let series = obj.series, extra;
     if (resp.duracion <= 20) series = Math.max(2, series - 1);
-    if (semana === 4) { series = Math.max(2, series - 1); extra = 0; }
+    if (semana === 4) { series = Math.max(2, Math.ceil(series / 2)); extra = 0; }
     else extra = (semana - 1) * (hi >= 10 ? 2 : 1);
     if (ej.tipo === "seg") {
       const base = { fuerza: 20, musculo: 25, grasa: 30, general: 25 }[resp.objetivo];
       return `${series} × ${semana < 4 ? base + (semana - 1) * 5 : base} s`;
     }
-    return `${series} × ${lo + extra}-${hi + extra} reps` + (semana === 4 ? " (RIR 2: deja 2 en reserva)" : "");
+    return `${series} × ${lo + extra}-${hi + extra} reps` + (semana === 4 ? " (RIR 3: misma carga, mitad de series)" : "");
   };
 
   // ------------------------------------------------------------ gym (gym.py)
@@ -94,10 +94,11 @@
   L.esDescarga = (semana) => semana % 4 === 0;
   L.tituloSemana = (semana) => `Semana ${semana} · ${D.FASES[L.faseDe(semana)][0]}` + (L.esDescarga(semana) ? " · descarga" : "");
 
-  function nivelGym(patron, fase, expOff, lim) {
+  function nivelGym(patron, fase, expOff, lim, equipo) {
     const base = patron.endsWith("_b") ? patron.slice(0, -2) : patron;
     const delta = patron.endsWith("_b") ? -1 : 0;
-    const cadena = D.GYM[base];
+    const cadena = D.GYM[base].filter((e) => D.PERMITIDO[equipo || "completo"].includes(D.EQUIPO_EJ[e[0]] || "libre"));
+    if (!cadena.length) return null;
     let lvl = fase + expOff + delta;
     if (base === "peso_muerto" && fase + expOff < 1) return null;
     if (lim.includes("hombros") && base === "hombro_press") return null;
@@ -114,11 +115,11 @@
 
   const ejGym = (patron, items) => ({ patron, niveles: items.map(([nombre, nota, tipo]) => ({ nombre, nota, tipo })) });
 
-  function bloqueFuerza(slots, n, expOff, lim) {
+  function bloqueFuerza(slots, n, expOff, lim, equipo) {
     const ejercicios = [], vistos = new Set();
     for (const patron of slots) {
       if (ejercicios.length >= n) break;
-      const orig = [0, 1, 2].map((f) => nivelGym(patron, f, expOff, lim));
+      const orig = [0, 1, 2].map((f) => nivelGym(patron, f, expOff, lim, equipo));
       if (!orig[0] && !orig[1] && !orig[2]) continue;
       const first = orig.find((x) => x);
       const porfase = orig.map((p) => p || first);
@@ -129,13 +130,19 @@
     return ejercicios;
   }
 
-  function bloqueAbs(n, expOff, lim) {
-    return ["abs_flex", "abs_core", "abs_piernas", "abs_rot"].slice(0, n).map((patron) =>
-      ejGym(patron, [0, 1, 2].map((f) => nivelGym(patron, f, expOff, lim))));
+  function bloqueAbs(n, expOff, lim, equipo) {
+    const out = [];
+    for (const patron of ["abs_flex", "abs_core", "abs_piernas", "abs_rot"].slice(0, n)) {
+      const orig = [0, 1, 2].map((f) => nivelGym(patron, f, expOff, lim, equipo));
+      if (!orig[0] && !orig[1] && !orig[2]) continue;
+      const first = orig.find((x) => x);
+      out.push(ejGym(patron, orig.map((p) => p || first)));
+    }
+    return out;
   }
 
-  function bloqueCardio(modo, lim, k) {
-    let lista = modo === "LISS" ? D.CARDIO_LISS : D.CARDIO_HIIT;
+  function bloqueCardio(modo, lim, k, equipo) {
+    let lista = (equipo || "completo") === "completo" ? (modo === "LISS" ? D.CARDIO_LISS : D.CARDIO_HIIT) : (modo === "LISS" ? D.CARDIO_CASA_LISS : D.CARDIO_CASA_HIIT);
     if (lim.includes("rodillas")) lista = lista.filter((e) => !D.CARDIO_SUAVE_RODILLAS.includes(e[0]));
     const r = k % lista.length;
     const rot = lista.slice(r).concat(lista.slice(0, r));
@@ -146,10 +153,12 @@
     const dias = resp.gym_dias, minutos = resp.gym_duracion, obj = resp.objetivo;
     const lim = resp.limitaciones || [];
     const expOff = { nunca: 0, poco: 0, medio: 1, avanzado: 2 }[resp.experiencia];
+    const equipo = resp.gym_equipo || "completo", pref = resp.gym_cardio || "mixto";
     const zonas = resp.zonas || [];
     const prio = new Set(zonas.flatMap((z) => D.ZONA_SLOTS[z] || []));
     const sesiones = [];
     D.ESTRUCTURA_GYM[obj][String(dias)].forEach(([clave, conAbs, cardio], i) => {
+      if (cardio && (pref === "LISS" || pref === "HIIT")) cardio = pref;
       let tAbs = conAbs ? 10 : 0, tCardio;
       if (clave === null) { tCardio = Math.max(20, Math.min(45, minutos - 5 - 12)); tAbs = 12; }
       else tCardio = cardio ? 12 : 0;
@@ -157,10 +166,10 @@
       const bloques = [];
       if (clave) {
         const n = Math.max((tAbs || tCardio) ? 2 : 3, Math.min(8, Math.floor(tFuerza / 9)));
-        bloques.push({ tipo: "Musculación", titulo: D.NOMBRES_SLOTS[clave], ejercicios: bloqueFuerza(D.SLOTS[clave].slice().sort((a, b) => (prio.has(a) ? 0 : 1) - (prio.has(b) ? 0 : 1)), n, expOff, lim) });
+        bloques.push({ tipo: "Musculación", titulo: D.NOMBRES_SLOTS[clave], ejercicios: bloqueFuerza(D.SLOTS[clave].slice().sort((a, b) => (prio.has(a) ? 0 : 1) - (prio.has(b) ? 0 : 1)), n, expOff, lim, equipo) });
       }
-      if (conAbs) bloques.push({ tipo: "Abdominales", titulo: "Abdominales y core", ejercicios: bloqueAbs((tAbs >= 12 || zonas.includes("abdomen")) ? 4 : 3, expOff, lim) });
-      if (cardio) bloques.push({ tipo: "Cardio", titulo: `Cardio ${cardio}`, modo: cardio, minutos: tCardio, ejercicios: bloqueCardio(cardio, lim, i) });
+      if (conAbs) bloques.push({ tipo: "Abdominales", titulo: "Abdominales y core", ejercicios: bloqueAbs((tAbs >= 12 || zonas.includes("abdomen")) ? 4 : 3, expOff, lim, equipo) });
+      if (cardio) bloques.push({ tipo: "Cardio", titulo: `Cardio ${cardio}`, modo: cardio, minutos: tCardio, ejercicios: bloqueCardio(cardio, lim, i, equipo) });
       sesiones.push({ nombre: clave ? D.NOMBRES_SLOTS[clave] : "Cardio y abdominales", bloques });
     });
     const calendario = {};
@@ -171,7 +180,7 @@
       resumen: Object.assign({}, resp, { dias, duracion: minutos }),
       semanas: D.SEMANAS_GYM, sesiones, calendario,
       calentamiento: [
-        { nombre: "Caminata en cinta inclinada (5 min suaves)", nota: "Sube el pulso y calienta articulaciones.", tipo: "min" },
+        { nombre: equipo === "completo" ? "Caminata en cinta inclinada (5 min suaves)" : "Caminata rápida en el sitio (5 min)", nota: "Sube el pulso y calienta articulaciones.", tipo: "min" },
         { nombre: mv[0][0], nota: mv[0][2], tipo: "reps" },
         { nombre: mv[3][0], nota: mv[3][2], tipo: "reps" },
       ],
@@ -207,7 +216,7 @@
     const [lo, hi] = D.REPS_GYM[resp.objetivo][f][compuesto ? 0 : 1];
     let series = compuesto ? D.SERIES_GYM[resp.objetivo][f] : Math.max(2, D.SERIES_GYM[resp.objetivo][f] - 1);
     let rir;
-    if (desc) { series = Math.max(2, series - 1); rir = "RIR 4 · baja el peso un 10%"; }
+    if (desc) { series = Math.max(2, Math.ceil(series / 2)); rir = "RIR 3 · misma carga, la mitad de series"; }
     else rir = D.RIR_GYM[f][w] ? `RIR ${D.RIR_GYM[f][w]}` : "al fallo técnico (última serie)";
     const descanso = compuesto ? { musculo: 90, fuerza: 150, grasa: 60, general: 90 }[resp.objetivo] : 60;
     return [`${series} × ${lo}-${hi} reps · ${rir}`, descanso];
@@ -231,6 +240,7 @@
     if (r.sueno === "<6") out.push("Duermes poco (<6 h): es cuando más se recupera el músculo; intenta llegar a 7-8 h.");
     if (r.dia === "sedentario") out.push("Tu día es sedentario: suma 8.000-10.000 pasos diarios además de entrenar.");
     const dias = r.dias !== undefined ? r.dias : (r.gym_dias || 0);
+    if (r.objetivo === "grasa" && dias >= 5) out.push("Para perder grasa suelen bastar 3-4 días con buena intensidad: más días no siempre aceleran el resultado. Si te cuesta recuperar, quita un día.");
     if (r.actual === "nunca" && dias >= 5) out.push("Empiezas desde cero con muchos días: si te cuesta, empieza con 3 y sube poco a poco.");
     return out;
   };
@@ -345,6 +355,31 @@
     }
     return out;
   };
+
+  // ------------------------------------------------------------ registro de series (port de registro.py)
+  L.TIPOS_SERIE = [["normal", "Normal"], ["calentamiento", "Calentamiento"], ["descarga", "Descarga"], ["fallo", "Al fallo"]];
+  const ICONO = { normal: "", calentamiento: "🔥 ", descarga: "📉 ", fallo: "💥 " };
+  L.e1rm = (peso, reps) => (peso <= 0 || reps <= 0 ? 0 : r1(reps > 1 ? peso * (1 + reps / 30) : peso));
+  function mejor1rm(hist, excluir) {
+    let best = 0, fecha = null;
+    for (const f of Object.keys(hist).sort()) {
+      if (f === excluir) continue;
+      for (const s of hist[f]) if (s.tipo !== "calentamiento") { const v = L.e1rm(s.peso, s.reps); if (v > best) { best = v; fecha = f; } }
+    }
+    return [best, fecha];
+  }
+  L.resumenRegistro = function (hist, hoy) {
+    const ant = Object.keys(hist).filter((f) => f !== hoy).sort();
+    const ultimo = ant.length ? { fecha: ant[ant.length - 1], sets: hist[ant[ant.length - 1]] } : null;
+    const [previo] = mejor1rm(hist, hoy), [total, fTotal] = mejor1rm(hist, null);
+    return { ultimo, mejor: total, fecha_mejor: fTotal, previo, pr_hoy: previo > 0 && total > previo && fTotal === hoy };
+  };
+  L.esPR = function (hist, hoy, serie) {
+    if (serie.tipo === "calentamiento") return false;
+    const [previo] = mejor1rm(hist, hoy);
+    return previo > 0 && L.e1rm(serie.peso, serie.reps) > previo;
+  };
+  L.fmtSerie = (s) => (ICONO[s.tipo] || "") + (s.peso > 0 ? `${String(s.peso).replace(".", ",")} kg × ${s.reps}` : `${s.reps} (peso corporal)`);
 
   root.LOGIC = L;
   if (typeof module !== "undefined") module.exports = L;

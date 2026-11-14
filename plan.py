@@ -138,15 +138,15 @@ def prescripcion(resp: dict, ej: dict, semana: int) -> str:
     series = obj["series"]
     if resp["duracion"] <= 20:
         series = max(2, series - 1)
-    if semana == 4:  # descarga
-        series = max(2, series - 1)
+    if semana == 4:  # descarga: ~la mitad de series con la misma carga
+        series = max(2, math.ceil(series / 2))
         extra = 0
     else:
         extra = (semana - 1) * (2 if hi >= 10 else 1)
     if ej["tipo"] == "seg":
         base = {"fuerza": 20, "musculo": 25, "grasa": 30, "general": 25}[resp["objetivo"]]
         return f"{series} × {base + (semana - 1) * 5 if semana < 4 else base} s"
-    return f"{series} × {lo + extra}-{hi + extra} reps" + (" (RIR 2: deja 2 en reserva)" if semana == 4 else "")
+    return f"{series} × {lo + extra}-{hi + extra} reps" + (" (RIR 3: misma carga, mitad de series)" if semana == 4 else "")
 
 
 def resumen_perfil(r: dict) -> list:
@@ -171,6 +171,9 @@ def resumen_perfil(r: dict) -> list:
         out.append("Duermes poco (<6 h): es cuando más se recupera el músculo; intenta llegar a 7-8 h.")
     if r.get("dia") == "sedentario":
         out.append("Tu día es sedentario: suma 8.000-10.000 pasos diarios además de entrenar.")
+    if r.get("objetivo") == "grasa" and r.get("dias", r.get("gym_dias", 0)) >= 5:
+        out.append("Para perder grasa suelen bastar 3-4 días con buena intensidad: más días no siempre aceleran el resultado. "
+                   "Si te cuesta recuperar, quita un día.")
     if r.get("actual") == "nunca" and r.get("dias", r.get("gym_dias", 0)) >= 5:
         out.append("Empiezas desde cero con muchos días: si te cuesta, empieza con 3 y sube poco a poco.")
     return out

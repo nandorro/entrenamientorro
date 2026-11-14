@@ -7,6 +7,7 @@ Ejecutar:  iniciar.bat   (o  python calistenia.py)
 """
 import json
 import math
+import re
 import random
 import sys
 import threading
@@ -18,11 +19,13 @@ from PySide6.QtCore import QObject, QPointF, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPen, QRadialGradient
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFrame, QHBoxLayout, QLineEdit,
                                QLabel, QListWidget, QListWidgetItem, QMessageBox, QProgressBar, QPushButton, QScrollArea,
-                               QSpinBox, QStackedWidget, QTabWidget, QTextBrowser, QVBoxLayout, QWidget)
+                               QPlainTextEdit, QSpinBox, QStackedWidget, QTabWidget, QTextBrowser, QVBoxLayout, QWidget)
 
 import drive
+import registro as reg
+from html import escape as esc
 from animaciones import ANIMS, AnimWidget, FotoWidget, anim_para
-from gym import (FASES, ejercicio_en, generar_plan_gym, prescripcion_gym, titulo_semana)
+from gym import (SENALES_DESCARGA, SENALES_TEXTO, FASES, ejercicio_en, generar_plan_gym, prescripcion_gym, titulo_semana)
 from graficas import Analisis, GraficaBarras, GraficaLinea
 from nutricion import generar_plan_nutricion
 from plan import NOMBRES_DIAS, generar_plan, prescripcion, resumen_perfil
@@ -237,6 +240,11 @@ PREG = {p["k"]: p for p in [
         ("🍫 Dulces", "dulces"), ("🥨 Salado", "salado"), ("🍟 Frituras", "frituras"), ("🥤 Refrescos", "refrescos"),
         ("🍷 Alcohol", "alcohol")]},
     {"k": "registro", "t": "¿Sueles apuntar lo que comes?", "o": [("Sí, casi siempre", "si"), ("No", "no")]},
+    {"k": "gym_equipo", "t": "¿Con qué material vas a entrenar?", "o": [
+        ("🏋️ Gimnasio completo (máquinas, poleas y barras)", "completo"),
+        ("🏠 Mancuernas, banco y barra de dominadas", "casa_barra"), ("🏠 Mancuernas y banco", "casa")]},
+    {"k": "gym_cardio", "t": "¿Qué cardio prefieres?", "o": [
+        ("🚶 Suave y constante (caminar, bici…)", "LISS"), ("⚡ Intervalos intensos", "HIIT"), ("🤷 Un poco de cada", "mixto")]},
     {"k": "gym_dias", "t": "¿Cuántos días por semana irás al gimnasio?", "o": [
         (f"{n} días", n) for n in (2, 3, 4, 5, 6)]},
     {"k": "gym_duracion", "t": "¿Cuánto tiempo tienes en el gimnasio por sesión?", "o": [
@@ -246,7 +254,8 @@ ORDEN = {
     "calistenia": ["objetivo", "info_meta", "experiencia", "actual", "flexiones", "dominadas", "sentadillas", "info_nivel",
                    "zonas", "equipo", "dias", "duracion", "info_estilo", "limitaciones", "dia", "sueno", "datos"],
     "gym": ["objetivo", "info_meta", "experiencia", "actual", "flexiones", "dominadas", "sentadillas", "info_nivel",
-            "zonas", "info_estilo", "limitaciones", "dia", "sueno", "datos", "gym_dias", "gym_duracion"],
+            "zonas", "info_estilo", "limitaciones", "dia", "sueno", "datos", "gym_equipo", "gym_cardio", "gym_dias",
+            "gym_duracion"],
 }
 ORDEN["nutricion"] = ["objetivo", "sexo", "dia", "sueno", "datos", "info_nutri", "dieta", "comidas", "desayuno", "agua",
                       "antojos", "registro"]
@@ -266,6 +275,7 @@ SECCION = {"objetivo": "Perfil", "info_meta": "Perfil", "experiencia": "Perfil",
            "flexiones": "Entrenamiento", "dominadas": "Entrenamiento", "sentadillas": "Entrenamiento",
            "info_nivel": "Entrenamiento", "zonas": "Entrenamiento", "equipo": "Entrenamiento", "dias": "Entrenamiento",
            "duracion": "Entrenamiento", "gym_dias": "Entrenamiento", "gym_duracion": "Entrenamiento",
+           "gym_equipo": "Entrenamiento", "gym_cardio": "Entrenamiento",
            "info_estilo": "Estilo de vida", "limitaciones": "Estilo de vida", "dia": "Estilo de vida",
            "sueno": "Estilo de vida", "datos": "Medidas", "sexo": "Perfil", "info_nutri": "Nutrición", "dieta": "Nutrición",
            "comidas": "Nutrición", "desayuno": "Nutrición", "agua": "Nutrición", "antojos": "Nutrición", "registro": "Nutrición"}
@@ -696,6 +706,7 @@ class Main(QWidget):
         vis.addWidget(self.foto, 1)
         der.addLayout(vis, 3)
         der.addWidget(self.tb_ses, 2)
+        der.addWidget(self._crear_panel_reg())
         cuerpo.addLayout(der, 1)
         sl.addLayout(cuerpo, 1)
         self.cmb_sem.currentIndexChanged.connect(self.pintar_sesion)
@@ -750,12 +761,14 @@ class Main(QWidget):
             for i, (n, d) in enumerate(FASES):
                 h.append(f"<p><b>{n}</b> (semanas {i * 4 + 1}-{i * 4 + 4})<br>{d}</p>")
             h.append("<p><i>En cada fase: semanas 1-3 cada vez más cerca del límite (menos repeticiones en reserva, RIR) "
-                     "y la semana 4 de descarga con menos series y un 10% menos de peso.</i></p>"
+                     "y la semana 4 de descarga con la mitad de series y la misma carga (RIR 3).</i></p>"
                      "<p><b>Doble progresión:</b> cuando hagas el máximo de repeticiones en todas las series con buena técnica, "
                      "sube el peso (1-2 kg en tren superior, 2-5 kg en pierna).</p>")
         else:
             h.append("<p><i>Semanas 1-3: sube reps o tiempo cada semana. Semana 4: descarga. Cuando llegues al "
                      "tope de reps en todas las series, pasa al siguiente ejercicio de la progresión.</i></p>")
+        h.append("<h3>🩺 ¿Cuándo descargar antes?</h3><ul>" + "".join(f"<li>{x}</li>" for x in SENALES_DESCARGA) + "</ul>"
+                 f"<p><i>{SENALES_TEXTO}</i></p>")
         return "".join(h)
 
     # ---- sesiones
@@ -824,6 +837,115 @@ class Main(QWidget):
         self.lst_ej.setCurrentItem(primero)
         self.elegir_ejercicio(primero)
 
+    # ---- temporizador de descanso y registro de series (como en Hevy)
+    def _crear_panel_reg(self):
+        self.panel_reg = QFrame(objectName="kpi")
+        self._ej_reg = None
+        self._desc_left = 0
+        pr = QVBoxLayout(self.panel_reg)
+        f1 = QHBoxLayout()
+        self.cmb_desc = QComboBox()
+        for sg in (30, 45, 60, 90, 120, 150, 180):
+            self.cmb_desc.addItem(f"{sg} s", sg)
+        self.btn_desc = QPushButton("⏱ Descanso")
+        self.btn_desc.clicked.connect(lambda: self._iniciar_timer(self.cmb_desc.currentData()))
+        self.lbl_desc = QLabel("", objectName="hint")
+        for w in (self.cmb_desc, self.btn_desc, self.lbl_desc):
+            f1.addWidget(w)
+        pr.addLayout(f1)
+        pr.addWidget(QLabel("📒 Registro de series", objectName="hint"))
+        f2 = QHBoxLayout()
+        self.sp_kg = QDoubleSpinBox(); self.sp_kg.setRange(0, 500); self.sp_kg.setSingleStep(0.5); self.sp_kg.setSuffix(" kg")
+        self.sp_rep = QSpinBox(); self.sp_rep.setRange(1, 300); self.sp_rep.setValue(10); self.sp_rep.setSuffix(" reps")
+        self.cmb_tipo = QComboBox()
+        for v, t in reg.TIPOS:
+            self.cmb_tipo.addItem(t, v)
+        self.btn_serie = QPushButton("➕ Serie")
+        self.btn_serie.clicked.connect(self._add_serie)
+        for w in (self.sp_kg, self.sp_rep, self.cmb_tipo, self.btn_serie):
+            f2.addWidget(w)
+        pr.addLayout(f2)
+        self.lbl_hoy = QLabel("")
+        self.lbl_hoy.setWordWrap(True)
+        self.lbl_hist = QLabel("", objectName="hint")
+        self.lbl_hist.setWordWrap(True)
+        self.btn_quitar = QPushButton("↩ Quitar última serie")
+        self.btn_quitar.clicked.connect(self._quitar_serie)
+        self.ed_nota = QPlainTextEdit()
+        self.ed_nota.setPlaceholderText("Notas de este ejercicio…")
+        self.ed_nota.setMaximumHeight(58)
+        self.timer_nota = QTimer(self, singleShot=True, interval=700)
+        self.timer_nota.timeout.connect(self._guardar_nota)
+        self.ed_nota.textChanged.connect(self.timer_nota.start)
+        self.timer_desc = QTimer(self, interval=1000)
+        self.timer_desc.timeout.connect(self._tick_desc)
+        for w in (self.lbl_hoy, self.lbl_hist, self.btn_quitar, self.ed_nota):
+            pr.addWidget(w)
+        self.panel_reg.setVisible(False)
+        return self.panel_reg
+
+    def _hist_reg(self):
+        return self.sec.setdefault("registro", {}).setdefault(self._ej_reg, {})
+
+    def _pintar_reg(self, aviso=""):
+        if not self._ej_reg:
+            return
+        h, hoy = self._hist_reg(), date.today().isoformat()
+        hs, r = h.get(hoy, []), reg.resumen(self._hist_reg(), hoy)
+        self.lbl_hoy.setText(("<b>Hoy:</b> " + " · ".join(esc(reg.fmt_serie(x)) for x in hs)) if hs
+                             else "Aún no has registrado series hoy.")
+        t = f"<b>{aviso}</b><br>" if aviso else ""
+        if r["ultimo"]:
+            t += f"Última vez ({r['ultimo']['fecha']}): " + " · ".join(esc(reg.fmt_serie(x)) for x in r["ultimo"]["sets"]) + "<br>"
+        if r["mejor"] > 0:
+            t += f"Mejor 1RM estimado: <b>{str(r['mejor']).replace('.', ',')} kg</b> ({r['fecha_mejor']})" + (" 🏆" if r["pr_hoy"] else "")
+        self.lbl_hist.setText(t)
+        self.btn_quitar.setEnabled(bool(hs))
+
+    def _add_serie(self):
+        if not self._ej_reg:
+            return
+        serie = {"peso": self.sp_kg.value(), "reps": self.sp_rep.value(), "tipo": self.cmb_tipo.currentData()}
+        h, hoy = self._hist_reg(), date.today().isoformat()
+        aviso = "🏆 ¡Nuevo récord de 1RM estimado!" if reg.es_pr(h, hoy, serie) else ""
+        h.setdefault(hoy, []).append(serie)
+        self._guardar()
+        self._pintar_reg(aviso)
+        self._iniciar_timer(self.cmb_desc.currentData())   # descanso automático tras cada serie
+
+    def _quitar_serie(self):
+        h, hoy = self._hist_reg(), date.today().isoformat()
+        if h.get(hoy):
+            h[hoy].pop()
+            if not h[hoy]:
+                del h[hoy]
+            self._guardar()
+            self._pintar_reg()
+
+    def _guardar_nota(self):
+        if self._ej_reg:
+            self.sec.setdefault("notas", {})[self._ej_reg] = self.ed_nota.toPlainText()
+            self._guardar()
+
+    def _iniciar_timer(self, seg):
+        self._desc_left = int(seg)
+        self._pintar_desc()
+        self.timer_desc.start()
+
+    def _tick_desc(self):
+        self._desc_left -= 1
+        self._pintar_desc()
+        if self._desc_left <= 0:
+            self.timer_desc.stop()
+            QApplication.beep()
+
+    def _pintar_desc(self):
+        try:
+            n = self._desc_left
+            self.lbl_desc.setText(f"⏳ {n // 60}:{n % 60:02d}" if n > 0 else "¡Siguiente serie! 💪")
+        except RuntimeError:
+            self.timer_desc.stop()
+
     def elegir_ejercicio(self, item, _=None):
         if item is None or not item.data(Qt.UserRole):
             return
@@ -838,6 +960,22 @@ class Main(QWidget):
             h.append(f"<p><b>Cómo se hace:</b> {ANIMS[clave]['texto']}</p>")
         h.append(f"<p>💡 {e['nota']}</p>")
         self.tb_ses.setHtml("".join(h))
+        self.timer_desc.stop()
+        self.lbl_desc.setText("")
+        mostrar = tipo in ("Musculación", "Abdominales", "Ejercicio") and e["tipo"] in ("reps", "seg")
+        self.panel_reg.setVisible(mostrar)
+        self._ej_reg = e["nombre"] if mostrar else None
+        if mostrar:
+            m = re.search(r"descanso (\d+) s", presc or "")
+            seg = int(m.group(1)) if m else 60
+            if self.cmb_desc.findData(seg) < 0:
+                self.cmb_desc.addItem(f"{seg} s", seg)
+            self.cmb_desc.setCurrentIndex(self.cmb_desc.findData(seg))
+            self.sp_rep.setSuffix(" s" if e["tipo"] == "seg" else " reps")
+            self.ed_nota.blockSignals(True)
+            self.ed_nota.setPlainText(self.sec.get("notas", {}).get(e["nombre"], ""))
+            self.ed_nota.blockSignals(False)
+            self._pintar_reg()
 
     # ----------------------------------------------------------- usuario y Drive
     def _init_hola(self):
